@@ -1,74 +1,159 @@
-# Federated HuggingFace Transformers using Flower and PyTorch
+## Directory Structure
 
-This introductory example to using [HuggingFace](https://huggingface.co) Transformers with Flower with PyTorch. This example has been extended from the [quickstart-pytorch](https://flower.ai/docs/examples/quickstart-pytorch.html) example. The training script closely follows the [HuggingFace course](https://huggingface.co/course/chapter3?fw=pt), so you are encouraged to check that out for a detailed explanation of the transformer pipeline.
+### Experimental Programs
+- `/federated_learning/Federated_Learning/gpu/`: 
+  - Basic experimental implementation of Federated Learning
+  - Statistical analysis of FedAvg weight parameters under malicious node participation using Shapiro-Wilk test
+- `/federated_learning/Fed_LLM/`: Basic experimental implementation of Federated LLM
+- `/federated_learning/Federated_Learning/quickstart-huggingface_2/`: Experimental implementation for detecting abnormal FedLLM training with malicious node participation
 
-Like `quickstart-pytorch`, running this example in itself is also meant to be quite easy.
+### Data Collection Directories
+Located in `/federated_learning/Federated_Learning/quickstart-huggingface_2/`:
+- `/for_dataset/`: Contains normal Federated LLM weight data
+- `/for_dataset_adversarial/`: Contains abnormal weight data from adversarial attacks
+- `/for_dataset_random/`: Contains abnormal weight data from label flipping attacks
+- `/five_model_random/`: Implementation of five binary classification models for detecting abnormal Federated LLM training using label flipping attack data
 
-## Project Setup
+# Federated Learning with HuggingFace Transformers
 
-Start by cloning the example project. We prepared a single-line command that you can copy into your shell which will checkout the example for you:
+This repository contains scripts for experimenting with federated learning in different scenarios using Flower and PyTorch with HuggingFace Transformers. The implementation is based on the IMDB dataset for sentiment analysis.
 
-```shell
-git clone --depth=1 https://github.com/adap/flower.git && mv flower/examples/quickstart-huggingface . && rm -rf flower && cd quickstart-huggingface
-```
+## Environment Setup
 
-This will create a new directory called `quickstart-huggingface` containing the following files:
+This project uses Poetry for dependency management and virtual environment creation. Poetry ensures that all dependencies are properly installed and isolated from your system Python installation.
 
-```shell
--- pyproject.toml
--- requirements.txt
--- client.py
--- server.py
--- README.md
-```
+### Setting up the environment with Poetry
 
-### Installing Dependencies
+1. First, make sure you have Poetry installed. If not, you can install it following the instructions at [Poetry's official website](https://python-poetry.org/docs/#installation).
 
-Project dependencies (such as `torch` and `flwr`) are defined in `pyproject.toml` and `requirements.txt`. We recommend [Poetry](https://python-poetry.org/docs/) to install those dependencies and manage your virtual environment ([Poetry installation](https://python-poetry.org/docs/#installation)) or [pip](https://pip.pypa.io/en/latest/development/), but feel free to use a different way of installing dependencies and managing virtual environments if you have other preferences.
+2. Clone this repository and navigate to the project directory.
 
-#### Poetry
-
-```shell
+3. The project includes a `pyproject.toml` file that defines all dependencies. To create a virtual environment and install all dependencies, run:
+```bash
 poetry install
+```
+
+4. To activate the virtual environment, run:
+```bash
 poetry shell
 ```
 
-Poetry will install all your dependencies in a newly created virtual environment. To verify that everything works correctly you can run the following command:
+5. You can now run any of the scripts in this repository within the Poetry virtual environment.
 
-```shell
-poetry run python3 -c "import flwr"
+### Using the `pyproject.toml` file
+
+The `pyproject.toml` file in this repository contains the following dependencies:
+```toml
+[build-system]
+requires = ["poetry-core>=1.4.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "quickstart-huggingface"
+version = "0.1.0"
+description = "Hugging Face Transformers Federated Learning Quickstart with Flower"
+authors = [
+    "The Flower Authors <hello@flower.ai>",
+    "Kaushik Amar Das <kaushik.das@iiitg.ac.in>",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.11"
+flwr = {extras = ["simulation"], version = "^1.8.0"}
+flwr-datasets = ">=0.0.2,<1.0.0"
+torch = ">=1.13.1,<2.0"
+transformers = ">=4.30.0,<5.0"
+evaluate = ">=0.4.0,<1.0"
+datasets = ">=2.0.0, <3.0"
+scikit-learn = ">=1.3.1, <2.0"
+matplotlib = "^3.8.4"
+seaborn = "^0.13.2"
+pandas = "^2.2.3"
+xgboost = "^2.1.2"
+imbalanced-learn = "^0.12.4"
 ```
 
-If you don't see any errors you're good to go!
+To use this file to recreate the exact environment:
+1. Copy the `pyproject.toml` file to your project directory.
+2. Run `poetry install` to create a virtual environment with all the specified dependencies.
+3. Run `poetry shell` to activate the environment.
+4. You can now run any of the scripts in this repository.
 
-#### pip
+Note that this `pyproject.toml` file specifies:
+- Python version 3.9 or 3.10 (not 3.11 or higher)
+- Flower version 1.8.0 or higher (with simulation extras)
+- PyTorch version 1.13.1 or higher (but below 2.0)
+- Transformers version 4.30.0 or higher (but below 5.0)
+- And various other dependencies for data processing, visualization, and machine learning
 
-Write the command below in your terminal to install the dependencies according to the configuration file requirements.txt.
+## Scripts Overview
 
-```shell
-pip install -r requirements.txt
+### Main Federated Learning Scripts
+
+#### main_correct.py
+This script implements standard federated learning using the IMDB dataset. Clients operate normally, saving model weights and tracking learning progress. This script can be used to establish baseline performance in an ideal environment without malicious clients.
+```bash
+python main_correct.py
 ```
 
-## Run Federated Learning with Flower
-
-Afterwards you are ready to start the Flower server as well as the clients. You can simply start the server in a terminal as follows:
-
-```shell
-python3 server.py
+#### main_random.py
+This script simulates a scenario where some clients exhibit malicious behavior. Specifically, a certain percentage of clients randomly change data labels to disrupt the learning process. This script can be used to test the robustness of federated learning systems against random label change attacks.
+```bash
+python main_random.py
 ```
 
-Now you are ready to start the Flower clients which will participate in the learning. To do so simply open two more terminal windows and run the following commands.
-
-Start client 1 in the first terminal:
-
-```shell
-python3 client.py --partition-id 0
+#### main_adversarial.py
+This script implements more advanced adversarial attacks. Malicious clients use adversarial text samples generated by TextFooler to confuse the model. This script can be used to evaluate the vulnerability of federated learning systems to more sophisticated adversarial attacks.
+```bash
+python main_adversarial.py
 ```
 
-Start client 2 in the second terminal:
+### Analysis and Visualization Scripts
 
-```shell
-python3 client.py --partition-id 1
+#### weight_analysis_saver.py
+This script analyzes weight files from federated learning and saves the results. Its main functions are:
+1. Loading saved weight files (.pth) and organizing them by layer name, round number, and client ID
+2. Calculating the variance and outliers of weights for each layer
+3. Saving analysis results as CSV files (both overall summary and layer-specific summaries)
+
+This script helps track how model weights from each client change during federated learning and can detect potential anomalies or signs of attacks.
+```bash
+python weight_analysis_saver.py
 ```
 
-You will see that PyTorch is starting a federated training.
+#### make_glaph.py
+This script visualizes the analysis results from federated learning. Its main functions are:
+1. Loading summary CSV files for each layer from the results directory
+2. Plotting the mean variance for each layer by round as a scatter plot
+3. Saving the generated graph as an image file
+
+This graph helps visually understand how the variance of weights in each layer changes during training, potentially allowing visual detection of abnormal behavior or attack effects.
+```bash
+python make_glaph.py
+```
+
+#### run_and_collect.py
+This script runs federated learning experiments multiple times and collects the results. Its main functions are:
+1. Running `main_new.py` a specified number of times
+2. Loading the summary files generated after each run and adding a run ID
+3. Combining data from all runs into a single dataset and saving it as a CSV file
+4. Cleaning up directories and files after each run
+
+This script helps ensure reproducibility of experiments and obtain statistically significant results from multiple runs.
+```bash
+python run_and_collect.py
+```
+
+#### test_check.py
+This script analyzes attention maps of the DistilBERT model. Its main functions are:
+1. Inputting positive and negative sentence samples into the model
+2. Obtaining attention maps for each transformer layer and attention head
+3. Calculating differences in attention maps between positive and negative sentences
+4. Visualizing the differences as heatmaps and saving them as image files
+
+This script helps understand how the model processes sentences with different sentiments and identifies which layers and heads are most sensitive to sentiment differences.
+```bash
+python test_check.py
+```
+
+By using the provided `pyproject.toml` file, anyone can recreate the exact environment needed to run these federated learning experiments, ensuring reproducibility and consistent results across different systems.
