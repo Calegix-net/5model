@@ -23,36 +23,34 @@ A federated learning project using Hugging Face Transformers and Flower framewor
 git clone https://git.t420.net/micaela/5model.git
 cd 5model/create_dataset
 ```
+# we use UV now
 
 2. Install dependencies using Poetry:
 ```bash
 cd .. # Go to project root where pyproject.toml is located
-poetry install
+uv install
 ```
-
-3. Activate the virtual environment:
-```bash
-poetry shell
-```
-
 ## Usage
 
 ### Quick Start
 
 1. **Run the main federated learning experiment**:
 ```bash
-poetry run python main.py
+uv run python main.py
+```
+_OR_
+
+2. **Run data collection script**:
+```bash
+uv run python run_and_collect.py
+```
+for the real deal
+
+3. **Combine datasets**:
+```bash
+uv run python combined.py
 ```
 
-2. **Combine datasets**:
-```bash
-poetry run python combined.py
-```
-
-3. **Run data collection script**:
-```bash
-poetry run python run_and_collect.py
-```
 
 4. **Use the convenience script**:
 ```bash
@@ -99,13 +97,13 @@ Key dependencies managed by Poetry:
 This project uses Poetry for dependency management. To add new dependencies:
 
 ```bash
-poetry add <package-name>
+uv add <package-name>
 ```
 
 To add development dependencies:
 
 ```bash
-poetry add --group dev <package-name>
+uv add --dev <package-name>
 ```
 
 ## Output Files
