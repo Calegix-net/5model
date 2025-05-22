@@ -2,7 +2,6 @@ import os
 # Timestamp functionality for all print statements
 import datetime
 import builtins
-import sys
 
 import torch
 import time

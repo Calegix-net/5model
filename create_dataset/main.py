@@ -5,7 +5,6 @@ import glob
 import pandas as pd
 from scipy import stats
 import flwr as fl
-import matplotlib.pyplot as plt
 # Import Context for Flower client_fn
 # Import timestamp logging utilities
 from flwr.common import Context
@@ -67,7 +66,7 @@ os.makedirs(LAYER_SPECIFIC_DIRECTORY, exist_ok=True)
 os.makedirs(SUMMARY_DIRECTORY, exist_ok=True)
 
 # Print configuration for verification
-print(f"Running with configuration:")
+print("Running with configuration:")
 print(f"- Enable Malicious Nodes: {ENABLE_MALICIOUS_NODES}")
 print(f"- Attack Type: {ATTACK_TYPE}")
 print(f"- Malicious Node Ratio: {MALICIOUS_NODE_RATIO}")
@@ -630,7 +629,7 @@ ray_init_config = {
 
 # Print OOM prevention configuration for clarity
 print("\nUsing Ray OOM prevention with:")
-print(f"- Using default Ray memory management")
+print("- Using default Ray memory management")
 # Memory monitoring settings are now using Ray defaults
 print(f"- CPU allocation: {CLIENT_CPU_ALLOCATION} cores per client (reduces parallelism)")
 print(f"- GPU allocation: {CLIENT_GPU_ALLOCATION} per client\n")

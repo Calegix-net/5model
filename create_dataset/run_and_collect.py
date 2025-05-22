@@ -1,11 +1,9 @@
 import os
 import argparse
 import shutil
-import concurrent.futures
 import subprocess
 import sys
 import pandas as pd
-import time
 import warnings
 
 # Parse attack mode argument BEFORE importing from config
@@ -64,6 +62,17 @@ warnings.filterwarnings("ignore", message="overflow encountered in cast")
 warnings.filterwarnings("ignore", message="overflow encountered in reduce")
 warnings.filterwarnings("ignore", message="invalid value encountered in multiply")
 warnings.filterwarnings("ignore", message="invalid value encountered in scalar multiply")
+
+print("""
+
+   .-.  <3
+  (. .)__,')
+  / V      )
+  \  (   \/       lets go
+   `._`._ \       ======
+ 8===<<==`'==D
+    
+    """)
 
 # Number of times to run main.py
 if "num_runs" in cli_args:
@@ -159,7 +168,7 @@ def create_final_dataset():
         # Clean up directories and files
         cleanup()
 
-    print(f"\nDataset creation complete!")
+    print("\nDataset creation complete!")
     print(f"Output file: {FINAL_DATASET_FILE}")
     print(f"{'Malicious' if ENABLE_MALICIOUS_NODES else 'Normal'} data collection complete.")
 
