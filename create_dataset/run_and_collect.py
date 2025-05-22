@@ -20,26 +20,26 @@ def parse_command_line_args():
                       help="Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)")
     parser.add_argument("-runs", "--num_runs", type=int,
                       help="Number of times to run main.py and collect data")
-    
+
     # Store the parsed arguments
     args_dict = {}
     args_provided = False
-    
+
     # Parse args without failing on unknown args (allows other scripts to add their own args)
     args, _ = parser.parse_known_args()
-    
+
     if args.mode:
         # Set this as environment variable so config.py can use it
         print(f"\nSetting attack mode: {args.mode}")
         os.environ["ATTACK_MODE"] = args.mode
         args_dict["mode"] = args.mode
         args_provided = True
-    
+
     # Store number of runs if provided
     if args.num_runs:
         args_dict["num_runs"] = args.num_runs
         args_provided = True
-    
+
     args_dict["args_provided"] = args_provided
     return args_dict
 
@@ -117,7 +117,7 @@ def run_main_and_collect(run_id):
     summary_path = os.path.join(SUMMARY_DIRECTORY, SUMMARY_FILE)
     if os.path.exists(summary_path):
         df = pd.read_csv(summary_path)
-        df["Run ID"] = run_id  # add run identifier
+        df["Run_ID"] = run_id  # add run identifier
         return df
     else:
         print(f"Error: {summary_path} does not exist")
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # If no arguments were provided, print help message and exit
     if not cli_args.get("args_provided", False):
         parser = argparse.ArgumentParser(description="Run and collect data with specific attack mode and run count")
-        parser.add_argument("-mode", type=str, choices=["none", "random_10pct", "random_15pct", "random_20pct", "random_30pct", "custom"], 
+        parser.add_argument("-mode", type=str, choices=["none", "random_10pct", "random_15pct", "random_20pct", "random_30pct", "custom"],
                           help="Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)")
         parser.add_argument("-runs", "--num_runs", type=int, help="Number of times to run main.py and collect data")
         parser.parse_args(["-h"])
