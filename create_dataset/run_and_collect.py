@@ -13,10 +13,17 @@ import warnings
 
 # Parse attack mode argument BEFORE importing from config
 # This allows us to modify the attack mode before config sets up the related variables
-def parse_attack_mode():
-    parser = argparse.ArgumentParser(description="Run with specific attack mode")
-    parser.add_argument("-mode", type=str, 
+def parse_command_line_args():
+    parser = argparse.ArgumentParser(description="Run and collect data with specific attack mode and run count")
+    parser.add_argument("-mode", type=str,
+                      choices=["none", "random_10pct", "random_15pct", "random_20pct", "random_30pct", "custom"],
                       help="Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)")
+    parser.add_argument("-runs", "--num_runs", type=int,
+                      help="Number of times to run main.py and collect data")
+    
+    # Store the parsed arguments
+    args_dict = {}
+    args_provided = False
     
     # Parse args without failing on unknown args (allows other scripts to add their own args)
     args, _ = parser.parse_known_args()
@@ -25,11 +32,19 @@ def parse_attack_mode():
         # Set this as environment variable so config.py can use it
         print(f"\nSetting attack mode: {args.mode}")
         os.environ["ATTACK_MODE"] = args.mode
-        return args.mode
-    return None
+        args_dict["mode"] = args.mode
+        args_provided = True
+    
+    # Store number of runs if provided
+    if args.num_runs:
+        args_dict["num_runs"] = args.num_runs
+        args_provided = True
+    
+    args_dict["args_provided"] = args_provided
+    return args_dict
 
 # Parse attack mode before importing config
-attack_mode = parse_attack_mode()
+cli_args = parse_command_line_args()
 
 # Now import from config (which will use our environment variable)
 from config import (
@@ -54,7 +69,11 @@ warnings.filterwarnings("ignore", message="invalid value encountered in multiply
 warnings.filterwarnings("ignore", message="invalid value encountered in scalar multiply")
 
 # Number of times to run main.py
-NUM_RUNS = 2  # specify number of runs
+if "num_runs" in cli_args:
+    NUM_RUNS = cli_args["num_runs"]  # Use the value provided via command line
+    print(f"Using number of runs from command line: {NUM_RUNS}")
+else:
+    NUM_RUNS = 2  # Default number of runs if not specified
 
 # Filename to save the dataset (from config)
 # Using FINAL_DATASET_FILE directly
@@ -149,4 +168,12 @@ def create_final_dataset():
 
 # Execute
 if __name__ == "__main__":
+    # If no arguments were provided, print help message and exit
+    if not cli_args.get("args_provided", False):
+        parser = argparse.ArgumentParser(description="Run and collect data with specific attack mode and run count")
+        parser.add_argument("-mode", type=str, choices=["none", "random_10pct", "random_15pct", "random_20pct", "random_30pct", "custom"], 
+                          help="Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)")
+        parser.add_argument("-runs", "--num_runs", type=int, help="Number of times to run main.py and collect data")
+        parser.parse_args(["-h"])
+        sys.exit(0)
     create_final_dataset()
