@@ -1,159 +1,126 @@
-## Directory Structure
+# Hugging Face Transformers Federated Learning Quickstart
 
-### Experimental Programs
-- `/federated_learning/Federated_Learning/gpu/`: 
-  - Basic experimental implementation of Federated Learning
-  - Statistical analysis of FedAvg weight parameters under malicious node participation using Shapiro-Wilk test
-- `/federated_learning/Fed_LLM/`: Basic experimental implementation of Federated LLM
-- `/federated_learning/Federated_Learning/quickstart-huggingface_2/`: Experimental implementation for detecting abnormal FedLLM training with malicious node participation
+A federated learning project using Hugging Face Transformers and Flower framework for distributed machine learning with support for malicious node simulation and attack scenarios.
 
-### Data Collection Directories
-Located in `/federated_learning/Federated_Learning/quickstart-huggingface_2/`:
-- `/for_dataset/`: Contains normal Federated LLM weight data
-- `/for_dataset_adversarial/`: Contains abnormal weight data from adversarial attacks
-- `/for_dataset_random/`: Contains abnormal weight data from label flipping attacks
-- `/five_model_random/`: Implementation of five binary classification models for detecting abnormal Federated LLM training using label flipping attack data
+## Features
 
-# Federated Learning with HuggingFace Transformers
+- **Federated Learning**: Distributed training using the Flower framework
+- **Transformer Models**: Integration with Hugging Face Transformers for sequence classification
+- **Attack Simulation**: Support for simulating malicious nodes and various attack types
+- **Data Management**: Automated dataset combination and processing
+- **Visualization**: Built-in plotting and analysis tools
+- **Configurable**: Extensive configuration options for experiments
 
-This repository contains scripts for experimenting with federated learning in different scenarios using Flower and PyTorch with HuggingFace Transformers. The implementation is based on the IMDB dataset for sentiment analysis.
+## Requirements
 
-## Environment Setup
+- Python >= 3.9, < 3.11
+- Poetry for dependency management
 
-This project uses Poetry for dependency management and virtual environment creation. Poetry ensures that all dependencies are properly installed and isolated from your system Python installation.
+## Installation
 
-### Setting up the environment with Poetry
-
-1. First, make sure you have Poetry installed. If not, you can install it following the instructions at [Poetry's official website](https://python-poetry.org/docs/#installation).
-
-2. Clone this repository and navigate to the project directory.
-
-3. The project includes a `pyproject.toml` file that defines all dependencies. To create a virtual environment and install all dependencies, run:
+1. Clone the repository:
 ```bash
+git clone https://git.t420.net/micaela/5model.git
+cd 5model/create_dataset
+```
+
+2. Install dependencies using Poetry:
+```bash
+cd .. # Go to project root where pyproject.toml is located
 poetry install
 ```
 
-4. To activate the virtual environment, run:
+3. Activate the virtual environment:
 ```bash
 poetry shell
 ```
 
-5. You can now run any of the scripts in this repository within the Poetry virtual environment.
+## Usage
 
-### Using the `pyproject.toml` file
+### Quick Start
 
-The `pyproject.toml` file in this repository contains the following dependencies:
-```toml
-[build-system]
-requires = ["poetry-core>=1.4.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-name = "quickstart-huggingface"
-version = "0.1.0"
-description = "Hugging Face Transformers Federated Learning Quickstart with Flower"
-authors = [
-    "The Flower Authors <hello@flower.ai>",
-    "Kaushik Amar Das <kaushik.das@iiitg.ac.in>",
-]
-
-[tool.poetry.dependencies]
-python = ">=3.9,<3.11"
-flwr = {extras = ["simulation"], version = "^1.8.0"}
-flwr-datasets = ">=0.0.2,<1.0.0"
-torch = ">=1.13.1,<2.0"
-transformers = ">=4.30.0,<5.0"
-evaluate = ">=0.4.0,<1.0"
-datasets = ">=2.0.0, <3.0"
-scikit-learn = ">=1.3.1, <2.0"
-matplotlib = "^3.8.4"
-seaborn = "^0.13.2"
-pandas = "^2.2.3"
-xgboost = "^2.1.2"
-imbalanced-learn = "^0.12.4"
-```
-
-To use this file to recreate the exact environment:
-1. Copy the `pyproject.toml` file to your project directory.
-2. Run `poetry install` to create a virtual environment with all the specified dependencies.
-3. Run `poetry shell` to activate the environment.
-4. You can now run any of the scripts in this repository.
-
-Note that this `pyproject.toml` file specifies:
-- Python version 3.9 or 3.10 (not 3.11 or higher)
-- Flower version 1.8.0 or higher (with simulation extras)
-- PyTorch version 1.13.1 or higher (but below 2.0)
-- Transformers version 4.30.0 or higher (but below 5.0)
-- And various other dependencies for data processing, visualization, and machine learning
-
-## Scripts Overview
-
-### Main Federated Learning Scripts
-
-#### main_correct.py
-This script implements standard federated learning using the IMDB dataset. Clients operate normally, saving model weights and tracking learning progress. This script can be used to establish baseline performance in an ideal environment without malicious clients.
+1. **Run the main federated learning experiment**:
 ```bash
-python main_correct.py
+poetry run python main.py
 ```
 
-#### main_random.py
-This script simulates a scenario where some clients exhibit malicious behavior. Specifically, a certain percentage of clients randomly change data labels to disrupt the learning process. This script can be used to test the robustness of federated learning systems against random label change attacks.
+2. **Combine datasets**:
 ```bash
-python main_random.py
+poetry run python combined.py
 ```
 
-#### main_adversarial.py
-This script implements more advanced adversarial attacks. Malicious clients use adversarial text samples generated by TextFooler to confuse the model. This script can be used to evaluate the vulnerability of federated learning systems to more sophisticated adversarial attacks.
+3. **Run data collection script**:
 ```bash
-python main_adversarial.py
+poetry run python run_and_collect.py
 ```
 
-### Analysis and Visualization Scripts
-
-#### weight_analysis_saver.py
-This script analyzes weight files from federated learning and saves the results. Its main functions are:
-1. Loading saved weight files (.pth) and organizing them by layer name, round number, and client ID
-2. Calculating the variance and outliers of weights for each layer
-3. Saving analysis results as CSV files (both overall summary and layer-specific summaries)
-
-This script helps track how model weights from each client change during federated learning and can detect potential anomalies or signs of attacks.
+4. **Use the convenience script**:
 ```bash
-python weight_analysis_saver.py
+./run.sh
 ```
 
-#### make_glaph.py
-This script visualizes the analysis results from federated learning. Its main functions are:
-1. Loading summary CSV files for each layer from the results directory
-2. Plotting the mean variance for each layer by round as a scatter plot
-3. Saving the generated graph as an image file
+### Configuration
 
-This graph helps visually understand how the variance of weights in each layer changes during training, potentially allowing visual detection of abnormal behavior or attack effects.
+The project uses a centralized configuration system in `config.py`. Key configuration options include:
+
+- `ENABLE_MALICIOUS_NODES`: Enable/disable malicious node simulation
+- `ATTACK_TYPE`: Type of attack to simulate
+- `MALICIOUS_NODE_RATIO`: Percentage of malicious nodes
+
+## Project Structure
+
+```
+create_dataset/
+├── main.py              # Main federated learning script
+├── config.py            # Configuration settings
+├── combined.py          # Dataset combination utilities
+├── run_and_collect.py   # Data collection script
+├── run.sh              # Convenience script
+├── *.csv               # Generated datasets
+└── README.md           # This file
+```
+
+## Dependencies
+
+Key dependencies managed by Poetry:
+
+- **Flower (flwr)**: Federated learning framework
+- **Transformers**: Hugging Face transformer models
+- **PyTorch**: Deep learning framework
+- **Datasets**: Hugging Face datasets library
+- **Scikit-learn**: Machine learning utilities
+- **XGBoost**: Gradient boosting framework
+- **Pandas**: Data manipulation
+- **Matplotlib/Seaborn**: Data visualization
+- **Imbalanced-learn**: Handling imbalanced datasets
+
+## Development
+
+This project uses Poetry for dependency management. To add new dependencies:
+
 ```bash
-python make_glaph.py
+poetry add <package-name>
 ```
 
-#### run_and_collect.py
-This script runs federated learning experiments multiple times and collects the results. Its main functions are:
-1. Running `main_new.py` a specified number of times
-2. Loading the summary files generated after each run and adding a run ID
-3. Combining data from all runs into a single dataset and saving it as a CSV file
-4. Cleaning up directories and files after each run
+To add development dependencies:
 
-This script helps ensure reproducibility of experiments and obtain statistically significant results from multiple runs.
 ```bash
-python run_and_collect.py
+poetry add --group dev <package-name>
 ```
 
-#### test_check.py
-This script analyzes attention maps of the DistilBERT model. Its main functions are:
-1. Inputting positive and negative sentence samples into the model
-2. Obtaining attention maps for each transformer layer and attention head
-3. Calculating differences in attention maps between positive and negative sentences
-4. Visualizing the differences as heatmaps and saving them as image files
+## Output Files
 
-This script helps understand how the model processes sentences with different sentiments and identifies which layers and heads are most sensitive to sentiment differences.
-```bash
-python test_check.py
-```
+The project generates several CSV files containing experimental results:
 
-By using the provided `pyproject.toml` file, anyone can recreate the exact environment needed to run these federated learning experiments, ensuring reproducibility and consistent results across different systems.
+- `combined_dataset_normal.csv`: Results from normal (non-malicious) runs
+- `dataset_random_*.csv`: Results with randomized attack patterns
+- `dataset_normal.csv`: Baseline normal dataset
+
+## License
+
+This project is part of the Flower federated learning ecosystem. Please refer to the original Flower project for licensing information.
+
+## Authors
+
+- Alexander Berns <alex@alexberns.net>
+- Micaela Hamono <micaela@micae.la>

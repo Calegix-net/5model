@@ -1,80 +1,126 @@
-# Dataset Creation Tool
+# Hugging Face Transformers Federated Learning Quickstart
 
-This tool is used to create datasets for federated learning experiments, with support for both normal and malicious node simulation.
+A federated learning project using Hugging Face Transformers and Flower framework for distributed machine learning with support for malicious node simulation and attack scenarios.
 
-## Configuration
+## Features
 
-Key configuration settings are in `config.py`:
+- **Federated Learning**: Distributed training using the Flower framework
+- **Transformer Models**: Integration with Hugging Face Transformers for sequence classification
+- **Attack Simulation**: Support for simulating malicious nodes and various attack types
+- **Data Management**: Automated dataset combination and processing
+- **Visualization**: Built-in plotting and analysis tools
+- **Configurable**: Extensive configuration options for experiments
 
-- `ENABLE_MALICIOUS_NODES`: Set to `True` to enable malicious node behavior, `False` for normal mode
-- `ATTACK_TYPE`: Set the attack type (e.g., "random") when malicious nodes are enabled
-- `MALICIOUS_NODE_RATIO`: The ratio of malicious nodes (e.g., 0.1 for 10%)
-- `MALICIOUS_DATA_RATIO`: The ratio of malicious data (e.g., 0.1 for 10%)
-- `FORCE_CPU`: Set to `True` to force CPU-only mode (useful for environments with limited GPU memory)
-- `NUM_CLIENTS` and `NUM_ROUNDS`: Control the scale of the simulation
+## Requirements
+
+- Python >= 3.9, < 3.11
+- Poetry for dependency management
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://git.t420.net/micaela/5model.git
+cd 5model/create_dataset
+```
+
+2. Install dependencies using Poetry:
+```bash
+cd .. # Go to project root where pyproject.toml is located
+poetry install
+```
+
+3. Activate the virtual environment:
+```bash
+poetry shell
+```
 
 ## Usage
 
-### 1. Creating a dataset
+### Quick Start
 
-To create a dataset using the configured settings:
+1. **Run the main federated learning experiment**:
+```bash
+poetry run python main.py
+```
+
+2. **Combine datasets**:
+```bash
+poetry run python combined.py
+```
+
+3. **Run data collection script**:
+```bash
+poetry run python run_and_collect.py
+```
+
+4. **Use the convenience script**:
+```bash
+./run.sh
+```
+
+### Configuration
+
+The project uses a centralized configuration system in `config.py`. Key configuration options include:
+
+- `ENABLE_MALICIOUS_NODES`: Enable/disable malicious node simulation
+- `ATTACK_TYPE`: Type of attack to simulate
+- `MALICIOUS_NODE_RATIO`: Percentage of malicious nodes
+
+## Project Structure
+
+```
+create_dataset/
+├── main.py              # Main federated learning script
+├── config.py            # Configuration settings
+├── combined.py          # Dataset combination utilities
+├── run_and_collect.py   # Data collection script
+├── run.sh              # Convenience script
+├── *.csv               # Generated datasets
+└── README.md           # This file
+```
+
+## Dependencies
+
+Key dependencies managed by Poetry:
+
+- **Flower (flwr)**: Federated learning framework
+- **Transformers**: Hugging Face transformer models
+- **PyTorch**: Deep learning framework
+- **Datasets**: Hugging Face datasets library
+- **Scikit-learn**: Machine learning utilities
+- **XGBoost**: Gradient boosting framework
+- **Pandas**: Data manipulation
+- **Matplotlib/Seaborn**: Data visualization
+- **Imbalanced-learn**: Handling imbalanced datasets
+
+## Development
+
+This project uses Poetry for dependency management. To add new dependencies:
 
 ```bash
-python run_and_collect.py
+poetry add <package-name>
 ```
 
-This will:
-- Run the simulation based on the configuration in `config.py`
-- Generate a dataset file (e.g., `dataset_normal.csv` or `dataset_random_10pct_20230523_120000.csv`)
-
-### 2. Combining datasets
-
-To combine multiple dataset files:
+To add development dependencies:
 
 ```bash
-python combined.py
+poetry add --group dev <package-name>
 ```
 
-This will combine all dataset files in the current directory and create a combined dataset file.
+## Output Files
 
-### 3. Examples
+The project generates several CSV files containing experimental results:
 
-#### Normal mode
+- `combined_dataset_normal.csv`: Results from normal (non-malicious) runs
+- `dataset_random_*.csv`: Results with randomized attack patterns
+- `dataset_normal.csv`: Baseline normal dataset
 
-```python
-# In config.py
-ENABLE_MALICIOUS_NODES = False
-```
+## License
 
-#### Malicious mode with random attack
+This project is part of the Flower federated learning ecosystem. Please refer to the original Flower project for licensing information.
 
-```python
-# In config.py
-ENABLE_MALICIOUS_NODES = True
-ATTACK_TYPE = "random"
-MALICIOUS_NODE_RATIO = 0.1  # 10% malicious nodes
-MALICIOUS_DATA_RATIO = 0.1  # 10% malicious data
-```
+## Authors
 
-### Memory Management
-
-If you encounter GPU memory errors ("CUDA out of memory"), you have several options:
-
-1. **Use CPU-only mode**:
-   ```python
-   # In config.py
-   FORCE_CPU = True  # Force CPU-only mode regardless of CUDA availability
-   ```
-
-2. **Reduce batch size**:
-   The default batch size is 8. For extremely memory-constrained environments, you can modify the batch size in `main.py` in the `load_data` function.
-
-3. **Reduce client concurrency**:
-   In `main.py`, the `client_resources` parameter in `start_simulation` controls how many resources each client can use.
-   ```python
-   client_resources={"num_cpus": 2, "num_gpus": 0.1}
-   ```
-   Lower values for `num_gpus` will reduce concurrent GPU usage.
-
-4. **Reduce model size**:
-   If you're still having memory issues, you could modify `MODEL_NAME` in `config.py` to use a smaller model.
+- Alexander Berns <alex@alexberns.net>
+- Micaela Hamono <micaela@micae.la>

@@ -1,7 +1,4 @@
 import pandas as pd
-# Import timestamper module to add timestamps to all print statements
-import timestamper
-
 import glob
 import os
 import time

@@ -1,14 +1,27 @@
 import os
-# Import timestamper module to add timestamps to all print statements
-import timestamper
+# Timestamp functionality for all print statements
+import datetime
+import builtins
 import sys
 
 import torch
 import time
 
+# Timestamp configuration - moved from timestamper.py
+# Store the original print function
+original_print = builtins.print
+
+# Define a new print function that adds timestamps
+def timestamped_print(*args, **kwargs):
+    timestamp = datetime.datetime.now().strftime('[%Y-%m-%d %H:%M:%S.%f]')
+    original_print(timestamp, *args, **kwargs)
+
+# Replace the built-in print function with our timestamped version
+builtins.print = timestamped_print
+
 # Configuration for federated learning
-NUM_CLIENTS = 2  # Number of clients
-NUM_ROUNDS = 1  # Number of rounds
+NUM_CLIENTS = 10  # Number of clients
+NUM_ROUNDS = 2  # Number of rounds
 
 # Attack mode configuration settings
 ATTACK_MODES = {

@@ -1,7 +1,4 @@
 import os
-# Import timestamper module to add timestamps to all print statements
-import timestamper
-
 import argparse
 import shutil
 import concurrent.futures
