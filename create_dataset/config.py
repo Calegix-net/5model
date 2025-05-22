@@ -1,6 +1,7 @@
 import os
 # Import timestamper module to add timestamps to all print statements
 import timestamper
+import sys
 
 import torch
 import time
@@ -9,11 +10,63 @@ import time
 NUM_CLIENTS = 2  # Number of clients
 NUM_ROUNDS = 1  # Number of rounds
 
+# Attack mode configuration settings
+ATTACK_MODES = {
+    "none": {
+        "enable": False,
+        "type": "normal",
+        "node_ratio": 0.0,
+        "data_ratio": 0.0
+    },
+    "random_10pct": {
+        "enable": True,
+        "type": "random",
+        "node_ratio": 0.1,
+        "data_ratio": 0.1
+    },
+    "random_15pct": {
+        "enable": True,
+        "type": "random",
+        "node_ratio": 0.15,
+        "data_ratio": 0.15
+    },
+    "custom": {
+        "enable": True,
+        "type": "random",
+        "node_ratio": 0.25,
+        "data_ratio": 0.1
+    },
+    "random_20pct": {
+        "enable": True,
+        "type": "random",
+        "node_ratio": 0.2,
+        "data_ratio": 0.2
+    },
+    "random_30pct": {
+        "enable": True,
+        "type": "random",
+        "node_ratio": 0.3,
+        "data_ratio": 0.3
+    }
+}
+
+# Current attack mode - set this to change all malicious node settings at once
+# Options: "none", "random_10pct", "random_15pct", "custom", "random_20pct", "random_30pct"
+
+# Check if attack mode was set via environment variable (from run_and_collect.py)
+if "ATTACK_MODE" in os.environ and os.environ["ATTACK_MODE"] in ATTACK_MODES:
+    CURRENT_ATTACK_MODE = os.environ["ATTACK_MODE"]
+    print(f"Using attack mode from environment: {CURRENT_ATTACK_MODE}")
+else:
+    # Default mode if not specified
+    CURRENT_ATTACK_MODE = "none"
+
 # Malicious node configuration
-ENABLE_MALICIOUS_NODES = False  # Flag to enable/disable malicious nodes
-ATTACK_TYPE = "normal"  # Options: "normal", "random"
-MALICIOUS_NODE_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
-MALICIOUS_DATA_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
+# These values are set based on CURRENT_ATTACK_MODE
+ENABLE_MALICIOUS_NODES = ATTACK_MODES[CURRENT_ATTACK_MODE]["enable"]  # Flag to enable/disable malicious nodes
+ATTACK_TYPE = ATTACK_MODES[CURRENT_ATTACK_MODE]["type"]  # Options: "normal", "random"
+MALICIOUS_NODE_RATIO = ATTACK_MODES[CURRENT_ATTACK_MODE]["node_ratio"]  # Ratio of malicious nodes
+MALICIOUS_DATA_RATIO = ATTACK_MODES[CURRENT_ATTACK_MODE]["data_ratio"]  # Ratio of malicious data
 
 # ---------------------------------
 # GPU and Memory Usage Configuration

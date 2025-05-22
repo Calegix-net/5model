@@ -2,13 +2,36 @@ import os
 # Import timestamper module to add timestamps to all print statements
 import timestamper
 
+import argparse
 import shutil
 import concurrent.futures
 import subprocess
+import sys
 import pandas as pd
 import time
 import warnings
-import os
+
+# Parse attack mode argument BEFORE importing from config
+# This allows us to modify the attack mode before config sets up the related variables
+def parse_attack_mode():
+    parser = argparse.ArgumentParser(description="Run with specific attack mode")
+    parser.add_argument("-mode", type=str, 
+                      help="Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)")
+    
+    # Parse args without failing on unknown args (allows other scripts to add their own args)
+    args, _ = parser.parse_known_args()
+    
+    if args.mode:
+        # Set this as environment variable so config.py can use it
+        print(f"\nSetting attack mode: {args.mode}")
+        os.environ["ATTACK_MODE"] = args.mode
+        return args.mode
+    return None
+
+# Parse attack mode before importing config
+attack_mode = parse_attack_mode()
+
+# Now import from config (which will use our environment variable)
 from config import (
     RESULT_DIRECTORY,
     DIRECTORY1,
