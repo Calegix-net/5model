@@ -6,8 +6,14 @@ import torch
 import time
 
 # Configuration for federated learning
-NUM_CLIENTS = 1  # Number of clients
+NUM_CLIENTS = 2  # Number of clients
 NUM_ROUNDS = 1  # Number of rounds
+
+# Malicious node configuration
+ENABLE_MALICIOUS_NODES = False  # Flag to enable/disable malicious nodes
+ATTACK_TYPE = "normal"  # Options: "normal", "random"
+MALICIOUS_NODE_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
+MALICIOUS_DATA_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
 
 # ---------------------------------
 # GPU and Memory Usage Configuration
@@ -54,12 +60,6 @@ else:
     print("Using CPU for computation (CUDA not available or disabled)")
 
 MODEL_NAME = "distilbert-base-uncased"
-
-# Malicious node configuration
-ENABLE_MALICIOUS_NODES = False  # Flag to enable/disable malicious nodes
-ATTACK_TYPE = "normal"  # Options: "normal", "random"
-MALICIOUS_NODE_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
-MALICIOUS_DATA_RATIO = 0.0  # Default: 0, set to 0.1 or other value when malicious nodes are enabled
 
 # Directory setup based on configuration
 def get_directory_names():

@@ -40,8 +40,8 @@ def combine_datasets():
         print(f"Processing: {file}")
         df = pd.read_csv(file)
         
-        # Adjust Run ID
-        df['Run ID'] = df['Run ID'] + max_run_id + 1
+        # Adjust Run ID - ensure both are integers for addition
+        df['Run ID'] = df['Run ID'].astype(int) + max_run_id + 1
         
         # Add file source info
         df['Source File'] = file

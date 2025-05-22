@@ -287,10 +287,13 @@ class IMDBClient(fl.client.NumPyClient):
         self.trainloader = trainloader
         self.testloader = testloader
         # Track device for memory management
-        self.device = next(model.parameters()).device
+        self.device = next(model.parameters()).device 
         # Set up amp for mixed precision training if on CUDA
         self.use_amp = self.device.type == "cuda" and hasattr(torch.cuda, 'amp')
-        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
+        # Initialize scaler properly without specifying a device parameter - it's inferred automatically
+        # The device parameter causes problems with unscaling FP16 gradients
+        # in newer PyTorch versions (2.7.0+)
+        self.scaler = torch.amp.GradScaler() if self.use_amp else None
         
         # Clean up memory at initialization time
         if self.device.type == "cuda":
@@ -375,7 +378,8 @@ class IMDBClient(fl.client.NumPyClient):
                 # Use mixed precision for forward pass when available
                 if self.use_amp:
                     # Automatic mixed precision training for better performance on GPU
-                    with torch.cuda.amp.autocast():
+                    # Note: with autocast allows computation in lower precision but keeps gradients in FP32
+                    with torch.amp.autocast('cuda'):
                         outputs = self.model(**batch)
                         # Scale loss for accumulation
                         loss = outputs.loss / accumulation_steps
@@ -469,7 +473,7 @@ class IMDBClient(fl.client.NumPyClient):
                     
                     # Use mixed precision for faster evaluation if available
                     if self.use_amp:
-                        with torch.cuda.amp.autocast():
+                        with torch.amp.autocast('cuda'):
                             outputs = self.model(**batch)
                     else:
                         outputs = self.model(**batch)
@@ -547,12 +551,12 @@ def client_fn(context: Context) -> fl.client.Client:
         # Load model with memory optimizations
         print(f"Loading model for client {cid}...")
         model_kwargs = {
-            'num_labels': 2,
-            'low_cpu_mem_usage': True,  # Use less CPU memory during loading
+            'num_labels': 2, 
+            'low_cpu_mem_usage': True  # Use less CPU memory during loading
         }
         
-        # Use mixed precision when on GPU
-        if DEVICE.type == "cuda":
+        # Don't force dtype to float16 (this causes issues with gradient scaling)
+        if False and DEVICE.type == "cuda":  # Disabled - loading FP16 model causes gradient unscaling issues
             model_kwargs['torch_dtype'] = torch.float16
         
         # Load model to CPU first

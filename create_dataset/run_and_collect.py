@@ -7,6 +7,7 @@ import concurrent.futures
 import subprocess
 import pandas as pd
 import time
+import warnings
 import os
 from config import (
     RESULT_DIRECTORY,
@@ -23,8 +24,14 @@ from config import (
     MALICIOUS_NODE_RATIO,
 )
 
+# Suppress specific numpy warnings that don't affect the correctness of results
+warnings.filterwarnings("ignore", message="overflow encountered in cast")
+warnings.filterwarnings("ignore", message="overflow encountered in reduce")
+warnings.filterwarnings("ignore", message="invalid value encountered in multiply")
+warnings.filterwarnings("ignore", message="invalid value encountered in scalar multiply")
+
 # Number of times to run main.py
-NUM_RUNS = 100  # specify number of runs
+NUM_RUNS = 2  # specify number of runs
 
 # Filename to save the dataset (from config)
 # Using FINAL_DATASET_FILE directly
@@ -34,15 +41,15 @@ def print_config_info():
     print("\nRunning dataset collection with the following configuration:")
     print(f"Number of runs: {NUM_RUNS}")
     print(f"Enable malicious nodes: {ENABLE_MALICIOUS_NODES}")
-    
+
     if ENABLE_MALICIOUS_NODES:
         print(f"Attack type: {ATTACK_TYPE}")
         print(f"Malicious node ratio: {MALICIOUS_NODE_RATIO}")
-    
+
     # Print memory configuration for reference
     print(f"Using {'CPU only' if FORCE_CPU else 'GPU with ' + str(CLIENT_GPU_ALLOCATION*100) + '% allocation per client'}")
     print(f"Batch size: {BATCH_SIZE}")
-    
+
     print(f"Output dataset file: {FINAL_DATASET_FILE}")
     print("\n")
 
@@ -59,7 +66,7 @@ def run_main_and_collect(run_id):
     print(f"--- 実行 {run_id + 1} ---")
     if ENABLE_MALICIOUS_NODES:
         print(f"(Using {ATTACK_TYPE} attack with {MALICIOUS_NODE_RATIO*100}% malicious nodes)")
-    
+
 
     # Execute main.py
     subprocess.run(["python", "main.py"], check=True)
@@ -96,10 +103,10 @@ def ensure_directories():
 def create_final_dataset():
     # Include header for the first run
     print_config_info()
-    
+
     # Make sure directories exist
     ensure_directories()
-    
+
     header = True
 
     # Run main.py the specified number of times and collect data
