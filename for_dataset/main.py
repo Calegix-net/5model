@@ -10,25 +10,25 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, Data
 from torch.utils.data import DataLoader
 from collections import OrderedDict
 
-# 定数の定義
-NUM_CLIENTS = 10  # クライアント数を指定
-NUM_ROUNDS = 10   # ラウンド数を指定
+# Define constants
+NUM_CLIENTS = 10  # Number of clients
+NUM_ROUNDS = 10   # Number of rounds
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_NAME = "distilbert-base-uncased"
 attack_type = "normal"
 MALICIOUS_NODE_RATIO = 0
 MALICIOUS_DATA_RATIO = 0
 
-# フェデレーテッドラーニング用ディレクトリ設定
+# Directory setup for federated learning
 directory1 = 'weight_pth_file_normal(10c10r)'
 result_directory = 'result(10c10r)'
 layer_specific_directory = os.path.join(result_directory, 'layer_specific_results')
 
-# all_layers_summary.csvを保存するディレクトリをdirectory1と同じ階層に作成
+# Create summary directory at same level as directory1 to save all_layers_summary.csv
 parent_directory = os.path.dirname(directory1)
 summary_directory = os.path.join(parent_directory, 'summary_results_normal(10c10r)')
 
-# 結果を保存するディレクトリが存在しない場合は作成
+# Create result directories if they don't exist
 if not os.path.exists(result_directory):
     os.makedirs(result_directory)
 if not os.path.exists(layer_specific_directory):
@@ -36,14 +36,14 @@ if not os.path.exists(layer_specific_directory):
 if not os.path.exists(summary_directory):
     os.makedirs(summary_directory)
 
-# 重みを保存するディレクトリが存在しない場合は作成
+# Create weight directory if it doesn't exist
 if not os.path.exists(directory1):
     os.makedirs(directory1)
 
-# グローバル精度の初期化
+# Initialize global accuracy list
 global_accuracy = []
 
-# データをロードする関数
+# Function to load data for a given client partition
 def load_data(partition_id):
     from flwr_datasets import FederatedDataset  # Make sure this import is correct
     fds = FederatedDataset(dataset="imdb", partitioners={"train": NUM_CLIENTS})
@@ -62,7 +62,7 @@ def load_data(partition_id):
     testloader = DataLoader(partition_train_test["test"], batch_size=16, collate_fn=data_collator)
     return trainloader, testloader
 
-# 重みのロードと解析を行う関数
+# Function to load and parse saved model weights from .pth files
 def load_weights(directory):
     weights_dict = {}
     for filepath in glob.glob(os.path.join(directory, "*.pth")):
@@ -82,7 +82,7 @@ def load_weights(directory):
     
     return weights_dict
 
-# 各レイヤーごとの分散と外れ値の確認を行う関数
+# Function to analyze per-layer variance and detect outliers in weights
 def analyze_weights(weights_dict):
     analysis_results = {}
     for layer_name, rounds in weights_dict.items():
@@ -91,15 +91,15 @@ def analyze_weights(weights_dict):
         for round_number, weights in rounds.items():
             weights_array = np.array(weights)
             
-            # 基本的な統計量の計算
+            # Compute basic statistics
             variance = np.var(weights_array, axis=0)
             mean_variance = np.mean(variance)
             
-            # 外れ値の検出
+            # Detect outliers
             z_scores = np.abs(stats.zscore(weights_array, axis=0))
             outliers = (z_scores > 3).sum()
             
-            # 重み値の統計量を計算
+            # Compute weight statistics
             weight_stats = {
                 'weight_min': np.min(weights_array),
                 'weight_max': np.max(weights_array),
@@ -119,7 +119,7 @@ def analyze_weights(weights_dict):
     
     return analysis_results
 
-# クライアントクラス
+# Client class implementing Flower's NumPyClient
 class IMDBClient(fl.client.NumPyClient):
     def __init__(self, cid, model, trainloader, testloader):
         self.cid = cid
@@ -150,7 +150,7 @@ class IMDBClient(fl.client.NumPyClient):
             total_loss += loss.item()
             total_examples += batch["input_ids"].size(0)
         
-        # 重みを保存
+        # Save layer weights
         state_dict = self.model.state_dict()
         for layer_name, weight in state_dict.items():
             if ".weight" in layer_name:
@@ -178,13 +178,13 @@ class IMDBClient(fl.client.NumPyClient):
         global_accuracy.append(accuracy)
         return float(total_loss / total_examples), total_examples, {"accuracy": accuracy}
 
-# クライアントの生成
+# Function to instantiate a federated client given its client ID
 def client_fn(cid: str) -> fl.client.Client:
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2).to(DEVICE)
     trainloader, testloader = load_data(int(cid))
     return IMDBClient(cid, model, trainloader, testloader).to_client()
 
-# メトリクスの集約
+# Aggregate metrics from client results
 def aggregate_metrics(results):
     aggregated_metrics = {}
     for result in results:
