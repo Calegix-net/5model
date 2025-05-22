@@ -21,7 +21,7 @@ builtins.print = timestamped_print
 
 # Configuration for federated learning
 NUM_CLIENTS = 10  # Number of clients
-NUM_ROUNDS = 2  # Number of rounds
+NUM_ROUNDS = 10  # Number of rounds
 
 # Attack mode configuration settings
 ATTACK_MODES = {

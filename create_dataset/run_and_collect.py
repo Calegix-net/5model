@@ -70,7 +70,7 @@ if "num_runs" in cli_args:
     NUM_RUNS = cli_args["num_runs"]  # Use the value provided via command line
     print(f"Using number of runs from command line: {NUM_RUNS}")
 else:
-    NUM_RUNS = 2  # Default number of runs if not specified
+    NUM_RUNS = 5  # Default number of runs if not specified
 
 # Filename to save the dataset (from config)
 # Using FINAL_DATASET_FILE directly
