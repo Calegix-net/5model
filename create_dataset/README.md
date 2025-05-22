@@ -16,48 +16,31 @@ A federated learning project using Hugging Face Transformers and Flower framewor
 - Python >= 3.9, < 3.11
 - Poetry for dependency management
 
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://git.t420.net/micaela/5model.git
-cd 5model/create_dataset
-```
-
-2. Install dependencies using Poetry:
-```bash
-cd .. # Go to project root where pyproject.toml is located
-poetry install
-```
-
-3. Activate the virtual environment:
-```bash
-poetry shell
-```
-
 ## Usage
 
 ### Quick Start
 
-1. **Run the main federated learning experiment**:
+1. **Use the script**:
 ```bash
-poetry run python main.py
+./run.sh
+```
+
+```bash
+usage: run_and_collect.py [-h] [-mode {none,random_10pct,random_15pct,random_20pct,random_30pct,custom}] [-runs NUM_RUNS]
+
+Run and collect data with specific attack mode and run count
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -mode {none,random_10pct,random_15pct,random_20pct,random_30pct,custom}
+                        Set the attack mode (none, random_10pct, random_15pct, random_20pct, random_30pct, custom)
+  -runs NUM_RUNS, --num_runs NUM_RUNS
+                        Number of times to run main.py and collect data
 ```
 
 2. **Combine datasets**:
 ```bash
-poetry run python combined.py
-```
-
-3. **Run data collection script**:
-```bash
-poetry run python run_and_collect.py
-```
-
-4. **Use the convenience script**:
-```bash
-./run.sh
-```
+uv run combined.py
 
 ### Configuration
 
@@ -99,13 +82,13 @@ Key dependencies managed by Poetry:
 This project uses Poetry for dependency management. To add new dependencies:
 
 ```bash
-poetry add <package-name>
+uv add <package-name>
 ```
 
 To add development dependencies:
 
 ```bash
-poetry add --group dev <package-name>
+poetry add --dev <package-name>
 ```
 
 ## Output Files
