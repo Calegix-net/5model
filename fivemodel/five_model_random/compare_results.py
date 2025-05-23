@@ -5,18 +5,18 @@ import seaborn as sns
 import os
 
 def load_all_results():
-    """全モデルの結果を読み込む"""
+    """Load results from all models"""
     models = ['random_forest', 'logistic_regression', 'svm', 'gradient_boosting', 'xgboost']
     all_results = []
     
     for model in models:
         model_dir = f'model_results/{model}'
         if os.path.exists(model_dir):
-            # First_Weight結果の読み込み
+            # Load First_Weight results
             fw_results = pd.read_csv(
                 os.path.join(model_dir, f'{model}_first_weight_only_results.csv')
             )
-            # Other Features結果の読み込み
+            # Load Other Features results
             other_results = pd.read_csv(
                 os.path.join(model_dir, f'{model}_other_features_results.csv')
             )
@@ -25,8 +25,8 @@ def load_all_results():
     return pd.concat(all_results, ignore_index=True)
 
 def create_comparison_plots(results_df, output_dir):
-    """モデル比較の可視化"""
-    # 精度比較プロット
+    """Visualize model comparisons"""
+    # Accuracy comparison plots
     plt.figure(figsize=(12, 6))
     metrics = ['Best_Score', 'Mean_CV_Score', 'Test_Accuracy']
     
@@ -46,26 +46,26 @@ def create_comparison_plots(results_df, output_dir):
     plt.close()
 
 def main():
-    # 結果保存用ディレクトリの作成
+    # Create directory for saving results
     output_dir = 'comparison_results'
     os.makedirs(output_dir, exist_ok=True)
     
-    # 全モデルの結果を読み込み
+    # Load all model results
     all_results = load_all_results()
     
-    # 結果の比較と可視化
+    # Compare and visualize results
     create_comparison_plots(all_results, output_dir)
     
-    # 詳細な比較結果をCSVファイルとして保存
+    # Save detailed comparison results to a CSV file
     all_results.to_csv(
         os.path.join(output_dir, 'all_models_comparison.csv'),
         index=False
     )
     
-    # 最良モデルの特定
+    # Identify the best model
     best_model = all_results.loc[all_results['Test_Accuracy'].idxmax()]
     
-    # 結果のサマリーをテキストファイルとして保存
+    # Save summary of results to a text file
     with open(os.path.join(output_dir, 'comparison_summary.txt'), 'w') as f:
         f.write("=== Model Comparison Summary ===\n\n")
         f.write(f"Best performing model: {best_model['Model']}\n")
