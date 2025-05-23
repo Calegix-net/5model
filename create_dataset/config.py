@@ -104,6 +104,11 @@ CLIENT_GPU_ALLOCATION = 0.5       # Fraction of GPU allocated per client (0.1 = 
 CLIENT_CPU_ALLOCATION = 3     # Number of CPUs allocated per client
 
 # Memory optimization settings
+## notes:
+# next run increase batchsize to 16 or 32
+# decrease gradient-accum to 1
+# we can afford this because of 16gb of vram
+#
 GPU_MEMORY_FRACTION = 0.5     # Limit memory usage per process (0.1 = 10% of GPU memory)
 BATCH_SIZE = 8                # Batch size for training and evaluation
 GRADIENT_ACCUMULATION = 2     # Number of batches to accumulate gradients over
