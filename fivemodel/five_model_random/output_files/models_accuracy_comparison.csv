@@ -1,1 +1,6 @@
 Model,Best Score,Mean CV Score,Std CV Score
+RandomForest,1.0,1.0,0.0
+LogisticRegression,1.0,1.0,0.0
+SVM,1.0,0.9921568627450981,0.013006371726883952
+GradientBoosting,1.0,1.0,0.0
+XGBoost,0.9888888888888889,0.9888888888888889,0.0

@@ -1,0 +1,6 @@
+Model,Best_Score,Mean_CV_Score,Std_CV_Score,Test_Accuracy
+RandomForest,1.0,1.0,0.0,1.0
+LogisticRegression,1.0,1.0,0.0,1.0
+SVM,1.0,1.0,0.0,1.0
+GradientBoosting,1.0,1.0,0.0,1.0
+XGBoost,0.9882352941176471,0.988235294117647,1.1102230246251565e-16,1.0

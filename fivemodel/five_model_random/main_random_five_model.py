@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import matplotlib
+# Use non-interactive backend to avoid tkinter errors when saving figures
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
@@ -96,7 +99,9 @@ stratified_kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 # Ignore DataFrameGroupBy deprecation warnings
 import warnings
+# Suppress deprecation and future warnings from pandas and scikit-learn internals
 warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning, module='sklearn')
 
 # Apply function (select only necessary columns to avoid warnings)
 middle_layers_df = middle_layers_df.groupby(['Run_ID'], group_keys=False).apply(calculate_change_rate)[['Run_ID', 'Round', 'Mean_Variance', 'Mean_Variance_Change_Rate']].reset_index(drop=True)
@@ -256,7 +261,6 @@ def perform_cross_validation(pipeline, param_grid, X, y, cv):
         traceback.print_exc()
         return None
 
-def plot_cv_comparison(cv_results_dict, output_dir, X_test, y_test):  # X_test と y_test を引数として追加
 def plot_cv_comparison(cv_results_dict, output_dir, X_test, y_test):
     # Modified plotting function: accepts X_test and y_test as arguments
     try:
