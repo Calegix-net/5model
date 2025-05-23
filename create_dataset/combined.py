@@ -19,10 +19,10 @@ def combine_datasets():
     # List to store dataframes
     dataframes = []
 
-    # Get existing max Run ID (initial value is -1)
+    # Get existing max Run_ID (initial value is -1)
     if os.path.exists(output_file):
         combined_df = pd.read_csv(output_file)
-        max_run_id = combined_df['Run ID'].max()
+        max_run_id = combined_df['Run_ID'].max()
         dataframes.append(combined_df)
     else:
         max_run_id = -1
@@ -37,8 +37,8 @@ def combine_datasets():
         print(f"Processing: {file}")
         df = pd.read_csv(file)
         
-        # Adjust Run ID - ensure both are integers for addition
-        df['Run ID'] = df['Run ID'].astype(int) + max_run_id + 1
+        # Adjust Run_ID - ensure both are integers for addition
+        df['Run_ID'] = df['Run_ID'].astype(int) + max_run_id + 1
         
         # Add file source info
         df['Source File'] = file
@@ -52,8 +52,8 @@ def combine_datasets():
         # Add to list of dataframes
         dataframes.append(df)
         
-        # Update max Run ID
-        max_run_id = df['Run ID'].max()
+        # Update max Run_ID
+        max_run_id = df['Run_ID'].max()
     
     # Combine all dataframes
     if dataframes:
