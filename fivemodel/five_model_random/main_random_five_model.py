@@ -19,58 +19,58 @@ from sklearn.preprocessing import StandardScaler
 
 import joblib
 
-# imbalanced-learn の Pipeline と SMOTE をインポート
+# Import Pipeline and SMOTE from imbalanced-learn
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
 
-# XGBoostのインポート
+# Import XGBoost
 from xgboost import XGBClassifier
 
-# データを読み込む
+# Load data
 df = pd.read_csv('dataset.csv', low_memory=False)
 
-# 'Attack_Type'を数値にマッピング
+# Map 'Attack_Type' to numeric
 df['Attack_Type'] = df['Attack_Type'].map({'normal': 0, 'random': 1})
 
-# マッピング後の欠損値を確認
+# Check missing values after mapping
 missing_attack_type = df['Attack_Type'].isnull().sum()
 print(f"マッピング後の欠損しているAttack_Typeの数: {missing_attack_type}")
 
-# 欠損値を削除
+# Remove missing values
 df = df.dropna(subset=['Attack_Type'])
 
-# 再度欠損値を確認
+# Check missing values again
 missing_attack_type_after = df['Attack_Type'].isnull().sum()
 print(f"欠損値処理後のAttack_Typeの数: {missing_attack_type_after}")
 
-# さらに、他の潜在的な欠損値も確認
+# Also check for other potential missing values
 total_missing = df.isnull().sum()
 print("各列の欠損値の数:")
 print(total_missing)
 
-# 数値列の欠損値を0で埋める
+# Fill missing numeric columns with 0
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 df[numeric_cols] = df[numeric_cols].fillna(0)
 
-# 出力ディレクトリ
+# Output directory
 output_dir = 'output_files'
 
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-# ユニークなLayerを表示
+# Display unique Layer values
 print("Unique Layer values:")
 print(df['Layer'].unique())
 
-# 中間層と最終層のキーワードを指定
+# Specify keywords for middle and final layers
 middle_layer_keywords = ['layer.3']
 final_layer_keywords = ['layer.5']
 
-# データをフィルタリング
+# Filter data
 middle_layers_df = df[df['Layer'].str.contains('|'.join(middle_layer_keywords), na=False)]
 final_layers_df = df[df['Layer'].str.contains('|'.join(final_layer_keywords), na=False)]
 
-# データフレームが空でないか確認
+# Check that DataFrames are not empty
 print("Middle layers dataframe shape:", middle_layers_df.shape)
 print("Final layers dataframe shape:", final_layers_df.shape)
 
@@ -84,24 +84,24 @@ if final_layers_df.empty:
     import sys
     sys.exit()
 
-# 変化率を計算する関数
+# Function to calculate change rate
 def calculate_change_rate(group):
     group = group.sort_values('Round')
     group['Mean_Variance_Change_Rate'] = group['Mean_Variance'].pct_change(fill_method=None)
     return group
 
-# StratifiedKFoldを使用して層化を維持
+# Use StratifiedKFold to maintain stratification
 stratified_kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-# DataFrameGroupByの警告を無視するか、別の方法で処理
+# Ignore DataFrameGroupBy deprecation warnings
 import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
-# 関数を適用（警告を避けるために必要な列のみを選択）
+# Apply function (select only necessary columns to avoid warnings)
 middle_layers_df = middle_layers_df.groupby(['Run_ID'], group_keys=False).apply(calculate_change_rate)[['Run_ID', 'Round', 'Mean_Variance', 'Mean_Variance_Change_Rate']].reset_index(drop=True)
 final_layers_df = final_layers_df.groupby(['Run_ID'], group_keys=False).apply(calculate_change_rate)[['Run_ID', 'Round', 'Mean_Variance', 'Mean_Variance_Change_Rate']].reset_index(drop=True)
 
-# 特徴量を計算
+# Compute features
 grouped = df.groupby('Run_ID')
 features = grouped.agg({
     'Mean_Variance': ['mean', 'std', 'min', 'max', 'median'],
@@ -112,7 +112,7 @@ features = grouped.agg({
 features.columns = ['Run_ID'] + ['_'.join(col).strip('_') for col in features.columns.values[1:]]
 features = features.rename(columns={'Layer_nunique': 'Num_Layers'})
 
-# 中間層の特徴量
+# Middle layer features
 middle_features = middle_layers_df.groupby('Run_ID').agg({
     'Mean_Variance': ['mean', 'std', 'min', 'max', 'median'],
     'Mean_Variance_Change_Rate': ['mean', 'std', 'min', 'max', 'median']
@@ -120,7 +120,7 @@ middle_features = middle_layers_df.groupby('Run_ID').agg({
 
 middle_features.columns = ['Run_ID'] + ['Middle_' + '_'.join(col).strip('_') for col in middle_features.columns.values[1:]]
 
-# 最終層の特徴量
+# Final layer features
 final_features = final_layers_df.groupby('Run_ID').agg({
     'Mean_Variance': ['mean', 'std', 'min', 'max', 'median'],
     'Mean_Variance_Change_Rate': ['mean', 'std', 'min', 'max', 'median']
@@ -128,74 +128,74 @@ final_features = final_layers_df.groupby('Run_ID').agg({
 
 final_features.columns = ['Run_ID'] + ['Final_' + '_'.join(col).strip('_') for col in final_features.columns.values[1:]]
 
-# 特徴量をマージ
+# Merge features
 features = pd.merge(features, middle_features, on='Run_ID', how='left')
 features = pd.merge(features, final_features, on='Run_ID', how='left')
 
-# 各'Run_ID'の'Attack_Type'を取得
+# Get 'Attack_Type' for each 'Run_ID'
 attack_type = grouped['Attack_Type'].first().reset_index()
 
-# 特徴量とラベルをマージ
+# Merge features and labels
 data = pd.merge(features, attack_type, on='Run_ID')
 
-# マージ後の欠損値を確認
+# Check missing values after merge
 missing_after_merge = data['Attack_Type'].isnull().sum()
 print(f"マージ後の欠損しているAttack_Typeの数: {missing_after_merge}")
 
 if missing_after_merge > 0:
     print("マージ後に欠損値が発生しています。Run_IDの整合性を確認してください。")
-    # 欠損しているRun_IDを表示
+    # Display missing Run_IDs
     missing_runs = data[data['Attack_Type'].isnull()]['Run_ID'].unique()
     print(f"欠損しているRun_ID: {missing_runs}")
-    # 欠損Run_IDを削除
+    # Remove missing Run_IDs
     data = data.dropna(subset=['Attack_Type'])
     print(f"欠損Run_IDを削除後のデータ形状: {data.shape}")
 
-# 特徴量行列Xとラベルベクトルyを準備
+# Prepare feature matrix X and label vector y
 feature_cols = [col for col in data.columns if col not in ['Run_ID', 'Attack_Type', 'Weight_Std']]
 X = data[feature_cols]
 y = data['Attack_Type']
 
-# yに欠損値がないことを確認
+# Confirm that y has no missing values
 if y.isnull().sum() > 0:
     print("Error: yにまだ欠損値が含まれています。データ前処理を見直してください。")
     import sys
     sys.exit()
 
-# クラス分布を確認
+# Check class distribution
 print("クラス分布:")
 print(y.value_counts())
 
-# yの統計情報を表示
+# Display statistics of y
 print("yの統計情報:")
 print(y.describe())
 
-# yのユニークな値を表示
+# Display unique values in y
 print("yのユニークな値:")
 print(y.unique())
 
-# yにNaNが含まれているか確認
+# Check if y contains NaN
 print(f"yにNaNが含まれているか: {y.isnull().any()}")
 
-# データのバランスを調整（グローバルなSMOTEの適用を削除）
-# SMOTEをパイプライン内でのみ適用するため、ここでは適用しない
+# Adjust data balance (remove global SMOTE application)
+# Do not apply SMOTE here; use it only within pipelines
 
-# 相関分析と保存
+# Correlation analysis and saving
 X_with_target = X.copy()
 X_with_target['Attack_Type'] = y
 corr_matrix = X_with_target.corr()
 
-# 相関行列を保存
+# Save correlation matrix
 corr_matrix.to_csv(os.path.join(output_dir, 'correlation_matrix.csv'))
 
-# ヒートマップをプロットして保存
+# Plot and save heatmap
 plt.figure(figsize=(20, 18))
 sns.heatmap(corr_matrix, annot=False, cmap='coolwarm')
 plt.title('Correlation Matrix')
 plt.savefig(os.path.join(output_dir, 'correlation_matrix.png'))
 plt.close()
 
-# 特徴量の分布をプロット
+# Plot feature distributions
 for col in feature_cols:
     plt.figure()
     sns.histplot(X[col], kde=True)
