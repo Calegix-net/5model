@@ -93,7 +93,7 @@ USE_CUDA = torch.cuda.is_available()
 # -------------------------------------------------------------------------
 # These settings are based on Ray's OOM prevention guidelines.
 # Refer to: https://docs.ray.io/en/latest/ray-core/scheduling/ray-oom-prevention.html
-# 
+#
 # To adjust the threshold, environment variables are used:
 # - RAY_memory_usage_threshold=0.95 (kill threshold at 95% memory usage)
 # - RAY_memory_monitor_refresh_ms=200 (check memory usage every 200ms)
@@ -110,15 +110,15 @@ CLIENT_CPU_ALLOCATION = 3     # Number of CPUs allocated per client
 # we can afford this because of 16gb of vram
 #
 GPU_MEMORY_FRACTION = 0.5     # Limit memory usage per process (0.1 = 10% of GPU memory)
-BATCH_SIZE = 8                # Batch size for training and evaluation
-GRADIENT_ACCUMULATION = 2     # Number of batches to accumulate gradients over
+BATCH_SIZE = 16                # Batch size for training and evaluation
+GRADIENT_ACCUMULATION = 1     # Number of batches to accumulate gradients over
 
 # Configure device (GPU or CPU)
 if USE_CUDA and not FORCE_CPU:
     # Try to use CUDA with memory efficiency settings
     try:
         # Limit memory usage to specified fraction per process
-        torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)  
+        torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)
         print(f"Using GPU with {GPU_MEMORY_FRACTION*100}% memory allocation per process")
     except Exception as e:
         print(f"Warning: Could not set GPU memory fraction: {e}")
@@ -134,12 +134,12 @@ MODEL_NAME = "distilbert-base-uncased"
 # Directory setup based on configuration
 def get_directory_names():
     attack_str = "normal" if not ENABLE_MALICIOUS_NODES else ATTACK_TYPE
-    
+
     weight_dir = f"weight_pth_file_{attack_str}({NUM_CLIENTS}c{NUM_ROUNDS}r)"
     result_dir = f"result({NUM_CLIENTS}c{NUM_ROUNDS}r)"
     layer_specific_dir = os.path.join(result_dir, "layer_specific_results")
     summary_dir = f"summary_results_{attack_str}({NUM_CLIENTS}c{NUM_ROUNDS}r)"
-    
+
     return weight_dir, result_dir, layer_specific_dir, summary_dir
 
 # Get directory names
