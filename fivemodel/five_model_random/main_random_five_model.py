@@ -161,6 +161,11 @@ if missing_after_merge > 0:
 feature_cols = [col for col in data.columns if col not in ['Run_ID', 'Attack_Type', 'Weight_Std']]
 X = data[feature_cols]
 y = data['Attack_Type']
+# Fill any missing feature values before resampling or modeling
+if X.isnull().values.any():
+    # Replace missing aggregated feature values (e.g., std of single sample) with 0
+    X = X.fillna(0)
+    print("Filled NaN values in feature matrix with 0.")
 
 # Confirm that y has no missing values
 if y.isnull().sum() > 0:
