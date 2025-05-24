@@ -874,7 +874,17 @@ def client_fn(context: Context) -> fl.client.Client:
         client_cache_key = f"client_{cid}"
         if client_cache_key in _client_cache:
             print(f"Reusing cached client {cid} for faster initialization")
-            return _client_cache[client_cache_key]
+            client = _client_cache[client_cache_key]
+            # Lazily initialise CUDA streams in case this worker was restarted
+            _init_cuda_streams()
+            if (
+                ENABLE_CUDA_STREAMS
+                and DEVICE.type == "cuda"
+                and getattr(client.numpy_client, "cuda_stream", None) is None
+                and _cuda_streams
+            ):
+                client.numpy_client.cuda_stream = _cuda_streams[int(cid) % len(_cuda_streams)]
+            return client
     
     print(f"Initializing client {cid}")
 
