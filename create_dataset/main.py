@@ -1043,17 +1043,8 @@ print(f"- CPU allocation: {CLIENT_CPU_ALLOCATION} cores per client (reduces para
 print(f"- GPU allocation: {CLIENT_GPU_ALLOCATION} per client\n")
 
 
-# Start background GPU warmup thread if enabled
-if KEEP_MODEL_WARM and DEVICE.type == "cuda":
-    warmup_thread = threading.Thread(target=async_gpu_warmup_worker, daemon=True)
-    warmup_thread.start()
-    print("Started GPU warmup background thread")
-
-# Pre-warm the GPU before simulation starts
-if DEVICE.type == "cuda" and (KEEP_MODEL_WARM or AGGRESSIVE_GPU_OPTIMIZATION):
-    print("Pre-warming GPU before simulation...")
-    ensure_gpu_is_warm()
-    print("GPU pre-warmed successfully")
+# Skip GPU warmup on the driver to avoid creating CUDA streams before Ray
+# serializes this module. Streams are initialized lazily inside each worker.
 
 # Print optimization settings summary
 print("\nGPU Optimization Settings:")
