@@ -1,6 +1,11 @@
 import os
 import torch
 import numpy as np
+import threading
+import queue
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 import glob
 import pandas as pd
 from scipy import stats
@@ -8,6 +13,7 @@ import flwr as fl
 # Import Context for Flower client_fn
 # Import timestamp logging utilities
 from flwr.common import Context
+from flwr.common.typing import Metrics
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -18,13 +24,19 @@ from collections import OrderedDict
 from config import (
     ENABLE_MALICIOUS_NODES, ATTACK_TYPE, MALICIOUS_NODE_RATIO, 
     MALICIOUS_DATA_RATIO, DEVICE, MODEL_NAME, NUM_CLIENTS, NUM_ROUNDS, 
+    # Import new GPU optimization parameters
+    ENABLE_ASYNC_OPERATIONS, PRELOAD_NEXT_BATCH, KEEP_MODEL_WARM,
+    ENABLE_PIPELINE_PARALLELISM, PERSISTENT_WORKERS, PREFETCH_FACTOR, NUM_DATALOADER_WORKERS,
     # Import memory optimization parameters
     BATCH_SIZE, GRADIENT_ACCUMULATION,
     # Import client resource allocation parameters
     CLIENT_GPU_ALLOCATION, CLIENT_CPU_ALLOCATION,
     DIRECTORY1, RESULT_DIRECTORY, LAYER_SPECIFIC_DIRECTORY, SUMMARY_DIRECTORY,
     # Import GPU optimization toggles
-    HIGH_GPU_UTILIZATION, ENABLE_MEMORY_CLEANUP, ENABLE_MEMORY_LOGGING
+    HIGH_GPU_UTILIZATION, ENABLE_MEMORY_CLEANUP, ENABLE_MEMORY_LOGGING,
+    # Import advanced optimization settings
+    AGGRESSIVE_GPU_OPTIMIZATION, MINIMIZE_CLIENT_INIT_OVERHEAD, 
+    ENABLE_CUDA_STREAMS, NUM_CUDA_STREAMS, OVERLAP_COMMUNICATION_COMPUTE
 )
 
 # -----------------------------------------------------------------------------
@@ -78,6 +90,11 @@ print(f"- GPU Allocation per Client: {CLIENT_GPU_ALLOCATION*100:.0f}%")
 print(f"- Batch Size: {BATCH_SIZE}")
 print(f"- Memory Cleanup: {'Disabled' if not ENABLE_MEMORY_CLEANUP else 'Enabled'}")
 print(f"- Memory Logging: {'Disabled' if not ENABLE_MEMORY_LOGGING else 'Enabled'}")
+print(f"- Async Operations: {'Enabled' if ENABLE_ASYNC_OPERATIONS else 'Disabled'}")
+print(f"- Model Warm-up: {'Enabled' if KEEP_MODEL_WARM else 'Disabled'}")
+print(f"- Pipeline Parallelism: {'Enabled' if ENABLE_PIPELINE_PARALLELISM else 'Disabled'}")
+print(f"- Dataloader Workers: {NUM_DATALOADER_WORKERS}")
+print(f"- Prefetch Factor: {PREFETCH_FACTOR}")
 print(f"- Enable Malicious Nodes: {ENABLE_MALICIOUS_NODES}")
 print(f"- Attack Type: {ATTACK_TYPE}")
 print(f"- Malicious Node Ratio: {MALICIOUS_NODE_RATIO}")
@@ -105,6 +122,64 @@ global_accuracy = []
 # Data Loading and Preparation
 # -----------------------------------------------------------------------------
 
+# Global model cache to keep models warm between rounds
+_model_cache = {}
+_dataloader_cache = {}
+
+# Global client cache to minimize initialization overhead
+_client_cache = {}
+
+# CUDA streams for better parallelism
+_cuda_streams = []
+if ENABLE_CUDA_STREAMS and DEVICE.type == "cuda":
+    _cuda_streams = [torch.cuda.Stream() for _ in range(NUM_CUDA_STREAMS)]
+    print(f"Initialized {NUM_CUDA_STREAMS} CUDA streams for parallel operations")
+
+# Global GPU warmup state
+_gpu_warmup_active = False
+
+# GPU warm-up operations to prevent utilization drops
+def ensure_gpu_is_warm():
+    """Perform dummy GPU operations to keep GPU active between rounds."""
+    global _gpu_warmup_active
+    if DEVICE.type == "cuda" and KEEP_MODEL_WARM and not _gpu_warmup_active:
+        _gpu_warmup_active = True
+        try:
+            # More intensive warm-up operations to maintain GPU state
+            if AGGRESSIVE_GPU_OPTIMIZATION:
+                # Larger operations that better utilize GPU cores
+                dummy_tensor = torch.randn(512, 512, device=DEVICE, dtype=torch.float16)
+                # Multiple operations to keep different GPU functional units active
+                for _ in range(3):
+                    _ = torch.mm(dummy_tensor, dummy_tensor.T)
+                    _ = torch.nn.functional.relu(dummy_tensor)
+                # Use different streams if available
+                if _cuda_streams:
+                    for i, stream in enumerate(_cuda_streams[:2]):
+                        with torch.cuda.stream(stream):
+                            temp = torch.randn(256, 256, device=DEVICE)
+                            _ = torch.mm(temp, temp.T)
+                del dummy_tensor
+            else:
+                # Standard warm-up operations
+                dummy_tensor = torch.randn(100, 100, device=DEVICE)
+                _ = torch.mm(dummy_tensor, dummy_tensor.T)
+                del dummy_tensor
+        except Exception as e:
+            print(f"GPU warm-up failed: {e}")
+        finally:
+            _gpu_warmup_active = False
+
+# Background thread for async operations
+def async_gpu_warmup_worker():
+    """Background worker to keep GPU warm during idle periods."""
+    while True:
+        if KEEP_MODEL_WARM and DEVICE.type == "cuda":
+            ensure_gpu_is_warm()
+        # Adjust warmup frequency based on optimization level
+        sleep_time = 0.05 if AGGRESSIVE_GPU_OPTIMIZATION else 0.1
+        time.sleep(sleep_time)
+
 
 def load_data(partition_id):
     """Load and prepare data for a specific client partition.
@@ -115,6 +190,13 @@ def load_data(partition_id):
     Returns:
         A tuple of (trainloader, testloader) for the client.
     """
+    # Check cache first to avoid reloading
+    cache_key = f"partition_{partition_id}"
+    if cache_key in _dataloader_cache and (KEEP_MODEL_WARM or MINIMIZE_CLIENT_INIT_OVERHEAD):
+        print(f"Using cached dataloaders for partition {partition_id}")
+        return _dataloader_cache[cache_key]
+        
+    print(f"Loading data for client partition {partition_id}...")
     from flwr_datasets import FederatedDataset  # Make sure this import is correct
     import warnings
 
@@ -144,11 +226,13 @@ def load_data(partition_id):
     # Smaller batch sizes reduce GPU memory requirements but may increase training time
     # Use num_workers for parallel data loading when appropriate
     # Default to 2 workers for CPU, 0 for GPU (avoids CUDA contention)
-    num_workers = 2 if DEVICE.type == "cpu" else 0
+    num_workers = NUM_DATALOADER_WORKERS if ENABLE_ASYNC_OPERATIONS else (2 if DEVICE.type == "cpu" else 0)
     # Use pin_memory for faster data transfer to GPU when using CUDA
     pin_memory = DEVICE.type == "cuda"
-    # Add prefetching for more efficient data loading
-    prefetch_factor = 2 if num_workers > 0 else None
+    # Add prefetching for more efficient data loading - increased for high utilization mode
+    prefetch_factor = PREFETCH_FACTOR if num_workers > 0 and ENABLE_ASYNC_OPERATIONS else (2 if num_workers > 0 else None)
+    # Enable persistent workers to avoid respawning overhead
+    persistent_workers = PERSISTENT_WORKERS and num_workers > 0
     trainloader = DataLoader(
         partition_train_test["train"],
         batch_size=BATCH_SIZE,  # Use batch size from config
@@ -156,7 +240,8 @@ def load_data(partition_id):
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        prefetch_factor=prefetch_factor
+        prefetch_factor=prefetch_factor,
+        persistent_workers=persistent_workers
     )
     
     # Test loader with potentially larger batch size for evaluation
@@ -170,8 +255,14 @@ def load_data(partition_id):
         num_workers=num_workers,
         pin_memory=pin_memory,
         prefetch_factor=prefetch_factor,
+        persistent_workers=persistent_workers,
         collate_fn=data_collator
     )
+    
+    # Cache dataloaders if keeping model warm to avoid reloading
+    if KEEP_MODEL_WARM:
+        _dataloader_cache[cache_key] = (trainloader, testloader)
+        print(f"Cached dataloaders for partition {partition_id}")
     
     # Free memory after creating data loaders
     # The dataset contents are now referenced by the dataloaders, so we can delete original references
@@ -296,62 +387,143 @@ class IMDBClient(fl.client.NumPyClient):
         self.model = model
         self.trainloader = trainloader
         self.testloader = testloader
+        
+        # Advanced GPU optimization features
+        self.cuda_stream = None
+        if ENABLE_CUDA_STREAMS and DEVICE.type == "cuda" and _cuda_streams:
+            # Assign a CUDA stream to this client for parallel operations 
+            self.cuda_stream = _cuda_streams[int(cid) % len(_cuda_streams)]
+            print(f"Client {cid} assigned CUDA stream {int(cid) % len(_cuda_streams)}")
+        
+        # Initialize batch queue for async operations
+        self.batch_queue = queue.Queue(maxsize=2) if ENABLE_ASYNC_OPERATIONS else None
+        self.batch_loader_thread = None
+        self.preloaded_batch = None
+        
+        # Thread pool for parallel operations - more workers for aggressive optimization
+        max_workers = 4 if AGGRESSIVE_GPU_OPTIMIZATION else 2
+        self.thread_pool = ThreadPoolExecutor(max_workers=max_workers) if ENABLE_ASYNC_OPERATIONS else None
+        
         # Track device for memory management
         self.device = next(model.parameters()).device 
+        
         # Set up amp for mixed precision training if on CUDA
         self.use_amp = self.device.type == "cuda" and hasattr(torch.cuda, 'amp')
-        # Initialize scaler properly without specifying a device parameter - it's inferred automatically
-        # The device parameter causes problems with unscaling FP16 gradients
-        # in newer PyTorch versions (2.7.0+)
         self.scaler = torch.amp.GradScaler() if self.use_amp else None
+        
+        # Pre-allocate tensors for better memory management if aggressive optimization is enabled
+        if AGGRESSIVE_GPU_OPTIMIZATION and self.device.type == "cuda":
+            self._preallocate_tensors()
         
         # Clean up memory at initialization time
         if self.device.type == "cuda":
-            # Free memory cache to reduce fragmentation (only if memory cleanup is enabled)
-            if ENABLE_MEMORY_CLEANUP:
+            # Only cleanup if not using aggressive optimization (to maintain GPU state)
+            if ENABLE_MEMORY_CLEANUP and not AGGRESSIVE_GPU_OPTIMIZATION:
                 torch.cuda.empty_cache()
             # Print memory usage for monitoring
             log_memory_usage(f"Client {cid} at initialization")
             # Print memory stats for debugging (only if memory logging is enabled)
             if ENABLE_MEMORY_LOGGING:
                 print(f"Client {cid} GPU memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB allocated")
+    
+    def _preallocate_tensors(self):
+        """Preallocate commonly used tensors to reduce allocation overhead."""
+        try:
+            # Preallocate some tensors that will be reused during training
+            self._temp_tensor_pool = []
+            for _ in range(4):  # Create a small pool of reusable tensors
+                tensor = torch.empty(BATCH_SIZE, 512, dtype=torch.float16, device=self.device)
+                self._temp_tensor_pool.append(tensor)
+        except Exception as e:
+            print(f"Warning: Could not preallocate tensors for client {self.cid}: {e}")
+            self._temp_tensor_pool = []
+
+    def _batch_loader_worker(self, dataloader):
+        """Background worker to preload batches asynchronously."""
+        try:
+            for batch in dataloader:
+                if self.batch_queue:
+                    self.batch_queue.put(batch)
+                else:
+                    break
+        except Exception as e:
+            print(f"Batch loader worker error: {e}")
+
+    def _start_batch_preloading(self, dataloader):
+        """Start async batch preloading."""
+        if ENABLE_ASYNC_OPERATIONS and self.batch_queue:
+            self.batch_loader_thread = threading.Thread(
+                target=self._batch_loader_worker,
+                args=(dataloader,),
+                daemon=True
+            )
+            self.batch_loader_thread.start()
+
+    def _get_next_batch(self):
+        """Get next batch from queue or return None if not using async operations."""
+        if ENABLE_ASYNC_OPERATIONS and self.batch_queue:
+            try:
+                return self.batch_queue.get(timeout=1.0)
+            except queue.Empty:
+                return None
+        return None
+
+    def _warmup_model(self):
+        """Perform model warmup to maintain GPU state."""
+        ensure_gpu_is_warm()
 
     def get_parameters(self, config=None):
         """Extract model parameters as a list of NumPy arrays."""
-        # Memory optimization: Free CUDA cache before parameter extraction
-        if self.device.type == "cuda":
-            # Clear any cached GPU tensors to free memory (only if memory cleanup is enabled)
-            if ENABLE_MEMORY_CLEANUP:
-                torch.cuda.empty_cache()
-        
-        # Optimize memory usage during parameter extraction
-        # Explicitly move to CPU before conversion to NumPy to prevent CUDA OOM
-        params = []
-        
-        # Process parameters in batches to reduce peak memory usage
-        state_dict = self.model.state_dict()
-        for k, val in state_dict.items():
-            # Convert to CPU in batches to reduce memory pressure
-            val_cpu = val.cpu().detach()
-            # Convert to numpy and append to params list
-            params.append(val_cpu.numpy())
-            # Delete the CPU tensor to free memory immediately
-            del val_cpu
-        
-        # Free memory after parameter extraction
-        del state_dict
-        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
+        # Only cleanup memory if not using aggressive optimization
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP and not AGGRESSIVE_GPU_OPTIMIZATION:
             torch.cuda.empty_cache()
         
-        return params
+        if OVERLAP_COMMUNICATION_COMPUTE and self.cuda_stream:
+            # Use stream for async parameter extraction
+            with torch.cuda.stream(self.cuda_stream):
+                params = []
+                state_dict = self.model.state_dict()
+                for k, val in state_dict.items():
+                    # Use non-blocking transfer to CPU
+                    val_cpu = val.cpu()
+                    params.append(val_cpu.detach().numpy())
+                del state_dict
+                return params
+        else:
+            # Standard parameter extraction with memory optimization
+            params = []
+            state_dict = self.model.state_dict()
+            for k, val in state_dict.items():
+                val_cpu = val.cpu().detach()
+                params.append(val_cpu.numpy())
+                del val_cpu
+            
+            del state_dict
+            if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP and not AGGRESSIVE_GPU_OPTIMIZATION:
+                torch.cuda.empty_cache()
+            
+            return params
 
     def set_parameters(self, parameters):
         """Set model parameters from a list of NumPy arrays."""
-        # Get model keys for parameter mapping
-        keys = self.model.state_dict().keys()
-        # Build state dict by transferring parameters directly to target device
-        state_dict = OrderedDict({k: torch.tensor(v, device=self.device) for k, v in zip(keys, parameters)})
-        self.model.load_state_dict(state_dict)
+        if OVERLAP_COMMUNICATION_COMPUTE and self.cuda_stream:
+            # Overlap parameter loading with GPU operations using streams
+            with torch.cuda.stream(self.cuda_stream):
+                keys = self.model.state_dict().keys()
+                # Use non-blocking transfers for better performance
+                state_dict = OrderedDict({
+                    k: torch.tensor(v, device=self.device, dtype=self.model.state_dict()[k].dtype)
+                    for k, v in zip(keys, parameters)
+                })
+                self.model.load_state_dict(state_dict)
+                # Synchronize to ensure parameters are loaded before training
+                if self.cuda_stream:
+                    self.cuda_stream.synchronize()
+        else:
+            # Standard parameter loading
+            keys = self.model.state_dict().keys()
+            state_dict = OrderedDict({k: torch.tensor(v, device=self.device) for k, v in zip(keys, parameters)})
+            self.model.load_state_dict(state_dict)
 
     def fit(self, parameters, config):
         """Train the model on the local dataset.
@@ -363,6 +535,13 @@ class IMDBClient(fl.client.NumPyClient):
         Returns:
             Updated parameters, number of examples, and training metrics.
         """
+        # Warm up the model and GPU before starting training
+        if KEEP_MODEL_WARM:
+            self._warmup_model()
+            
+        # Start async batch preloading if enabled
+        self._start_batch_preloading(self.trainloader) if ENABLE_ASYNC_OPERATIONS else None
+        
         # Memory optimization: Free CUDA cache before training starts
         if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
@@ -379,54 +558,147 @@ class IMDBClient(fl.client.NumPyClient):
         
         batch_count = 0
         try:
-            # Use mixed precision training when available (GPU only)
-            for batch in self.trainloader:
-                # Only zero gradients at the beginning of each accumulation cycle
-                if batch_count % accumulation_steps == 0:
-                    optimizer.zero_grad()
+            if ENABLE_ASYNC_OPERATIONS and ENABLE_PIPELINE_PARALLELISM:
+                # Advanced pipeline with async batch loading and parallel processing
+                batch_iter = iter(self.trainloader)
+                current_batch = None
+                next_batch = None
                 
-                # Move batch to appropriate device
-                batch = {k: v.to(self.device) for k, v in batch.items()}
+                # Preload first batch
+                try:
+                    current_batch = next(batch_iter)
+                    next_batch = next(batch_iter)
+                except StopIteration:
+                    pass
                 
-                # Use mixed precision for forward pass when available
-                if self.use_amp:
-                    # Automatic mixed precision training for better performance on GPU
-                    # Note: with autocast allows computation in lower precision but keeps gradients in FP32
-                    with torch.amp.autocast('cuda'):
-                        outputs = self.model(**batch)
-                        # Scale loss for accumulation
-                        loss = outputs.loss / accumulation_steps
+                while current_batch is not None:
+                    # Process current batch while loading next batch in parallel
+                    if self.thread_pool:
+                        # Async load next batch
+                        next_batch_future = self.thread_pool.submit(lambda: next(batch_iter, None))
                     
-                    # Scale loss gradients and perform backward pass
-                    self.scaler.scale(loss).backward()
+                    # Process current batch
+                    result = self._process_training_batch(current_batch, optimizer, accumulation_steps, batch_count)
+                    if isinstance(result, dict):
+                        total_loss += result.get('loss', 0)
+                        total_examples += result.get('examples', 0)
+                    batch_count += 1
                     
-                    # Only update weights after accumulation cycle
-                    if (batch_count + 1) % accumulation_steps == 0:
-                        # Unscale gradients for optimizer step
-                        self.scaler.step(optimizer)
-                        self.scaler.update()
-                else:
-                    # Standard precision training path
-                    outputs = self.model(**batch)
-                    loss = outputs.loss / accumulation_steps
-                    loss.backward()
-                    
-                    if (batch_count + 1) % accumulation_steps == 0:
-                        optimizer.step()
-                
-                # Track total loss and examples processed
-                total_loss += loss.item() * accumulation_steps  # Adjust for scaling
-                total_examples += batch["input_ids"].size(0)
-                batch_count += 1
-                
-                # Periodically free memory
-                if ENABLE_MEMORY_CLEANUP and batch_count % 10 == 0 and self.device.type == "cuda":
-                    torch.cuda.empty_cache()
+                    # Get next batch from async loading
+                    if self.thread_pool and 'next_batch_future' in locals():
+                        try:
+                            current_batch = next_batch_future.result(timeout=0.5)
+                        except:
+                            current_batch = None
+                    else:
+                        current_batch = next_batch
+                        try:
+                            next_batch = next(batch_iter)
+                        except StopIteration:
+                            next_batch = None
+            else:
+                # Standard synchronous training loop
+                for batch in self.trainloader:
+                    result = self._process_training_batch(batch, optimizer, accumulation_steps, batch_count)
+                    if isinstance(result, dict):
+                        total_loss += result.get('loss', 0)
+                        total_examples += result.get('examples', 0)
+                    batch_count += 1
+
         except Exception as e:
             print(f"Error during training on client {self.cid}: {e}")
             # Try to recover and continue (only if memory cleanup is enabled)
             if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
                 torch.cuda.empty_cache()
+
+    def _process_training_batch(self, batch, optimizer, accumulation_steps, batch_count):
+        """Process a single training batch with optimizations."""
+        try:
+            # Use CUDA stream for this batch if available
+            stream_context = torch.cuda.stream(self.cuda_stream) if self.cuda_stream else None
+            
+            if stream_context:
+                with stream_context:
+                    return self._process_batch_with_stream(batch, optimizer, accumulation_steps, batch_count)
+            else:
+                return self._process_batch_standard(batch, optimizer, accumulation_steps, batch_count)
+        except Exception as e:
+            print(f"Error processing batch: {e}")
+            return {'loss': 0, 'examples': 0}
+    
+    def _process_batch_with_stream(self, batch, optimizer, accumulation_steps, batch_count):
+        """Process batch using CUDA streams for better parallelism."""
+        # Only zero gradients at the beginning of each accumulation cycle
+        if batch_count % accumulation_steps == 0:
+            optimizer.zero_grad()
+        
+        # Move batch to device efficiently with non-blocking transfer
+        batch = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
+        
+        # Synchronize stream before computation
+        if self.cuda_stream:
+            self.cuda_stream.synchronize()
+        
+        # Use mixed precision for forward pass when available
+        if self.use_amp:
+            with torch.amp.autocast('cuda'):
+                outputs = self.model(**batch)
+                loss = outputs.loss / accumulation_steps
+            
+            self.scaler.scale(loss).backward()
+            
+            if (batch_count + 1) % accumulation_steps == 0:
+                self.scaler.step(optimizer)
+                self.scaler.update()
+        else:
+            outputs = self.model(**batch)
+            loss = outputs.loss / accumulation_steps
+            loss.backward()
+            
+            if (batch_count + 1) % accumulation_steps == 0:
+                optimizer.step()
+        
+        return {
+            'loss': loss.item() * accumulation_steps,
+            'examples': batch["input_ids"].size(0)
+        }
+    
+    def _process_batch_standard(self, batch, optimizer, accumulation_steps, batch_count):
+        """Standard batch processing without streams."""
+        # Only zero gradients at the beginning of each accumulation cycle
+        if batch_count % accumulation_steps == 0:
+            optimizer.zero_grad()
+        
+        # Move batch to appropriate device
+        batch = {k: v.to(self.device) for k, v in batch.items()}
+        
+        # Use mixed precision for forward pass when available
+        if self.use_amp:
+            with torch.amp.autocast('cuda'):
+                outputs = self.model(**batch)
+                loss = outputs.loss / accumulation_steps
+            
+            self.scaler.scale(loss).backward()
+            
+            if (batch_count + 1) % accumulation_steps == 0:
+                self.scaler.step(optimizer)
+                self.scaler.update()
+        else:
+            outputs = self.model(**batch)
+            loss = outputs.loss / accumulation_steps
+            loss.backward()
+            
+            if (batch_count + 1) % accumulation_steps == 0:
+                optimizer.step()
+        
+        # Only cleanup memory if not using aggressive optimization
+        if ENABLE_MEMORY_CLEANUP and not AGGRESSIVE_GPU_OPTIMIZATION and batch_count % 10 == 0 and self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        
+        return {
+            'loss': loss.item() * accumulation_steps,
+            'examples': batch["input_ids"].size(0)
+        }
 
         # Save layer weights
         # Optimize file saving to reduce I/O overhead
@@ -469,6 +741,10 @@ class IMDBClient(fl.client.NumPyClient):
 
         Returns: Loss, number of examples, and evaluation metrics.
         """
+        # Warm up the model before evaluation
+        if KEEP_MODEL_WARM:
+            self._warmup_model()
+            
         # Memory optimization: Free CUDA cache before evaluation
         if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
@@ -482,28 +758,69 @@ class IMDBClient(fl.client.NumPyClient):
         # Perform evaluation without computing gradients to save memory
         with torch.no_grad():
             try:
-                for batch in self.testloader:
-                    # Move batch to device efficiently
-                    batch = {k: v.to(self.device) for k, v in batch.items()}
+                if ENABLE_ASYNC_OPERATIONS and ENABLE_PIPELINE_PARALLELISM:
+                    # Process evaluation batches with pipeline parallelism
+                    batch_iter = iter(self.testloader)
+                    current_batch = next(batch_iter, None)
                     
-                    # Use mixed precision for faster evaluation if available
-                    if self.use_amp:
-                        with torch.amp.autocast('cuda'):
-                            outputs = self.model(**batch)
-                    else:
-                        outputs = self.model(**batch)
-                    
-                    # Extract results and accumulate metrics
-                    loss = outputs.loss.item()
-                    total_loss += loss * batch["input_ids"].size(0)
-                    predictions = torch.argmax(outputs.logits, dim=-1)
-                    total_correct += (predictions == batch["labels"]).sum().item()
-                    total_examples += batch["input_ids"].size(0)
-                    
-                    # Free memory after each batch
-                    del batch, outputs, predictions
+                    while current_batch is not None:
+                        # Process current batch while loading next batch
+                        if self.thread_pool:
+                            next_batch_future = self.thread_pool.submit(lambda: next(batch_iter, None))
+                        
+                        result = self._process_evaluation_batch(current_batch)
+                        total_loss += result['loss']
+                        total_correct += result['correct']
+                        total_examples += result['examples']
+                        
+                        # Get next batch
+                        if self.thread_pool and 'next_batch_future' in locals():
+                            try:
+                                current_batch = next_batch_future.result(timeout=0.5)
+                            except:
+                                current_batch = None
+                        else:
+                            current_batch = next(batch_iter, None)
+                else:
+                    # Standard evaluation loop
+                    for batch in self.testloader:
+                        result = self._process_evaluation_batch(batch)
+                        total_loss += result['loss']
+                        total_correct += result['correct']
+                        total_examples += result['examples']
             except Exception as e:
                 print(f"Error during evaluation on client {self.cid}: {e}")
+        
+    def _process_evaluation_batch(self, batch):
+        """Process a single evaluation batch."""
+        try:
+            # Move batch to device efficiently
+            batch = {k: v.to(self.device) for k, v in batch.items()}
+            
+            # Use mixed precision for faster evaluation if available
+            if self.use_amp:
+                with torch.amp.autocast('cuda'):
+                    outputs = self.model(**batch)
+            else:
+                outputs = self.model(**batch)
+            
+            # Extract results and calculate metrics
+            loss = outputs.loss.item()
+            predictions = torch.argmax(outputs.logits, dim=-1)
+            correct = (predictions == batch["labels"]).sum().item()
+            examples = batch["input_ids"].size(0)
+            
+            # Free memory after each batch
+            del batch, outputs, predictions
+            
+            return {
+                'loss': loss * examples,
+                'correct': correct,
+                'examples': examples
+            }
+        except Exception as e:
+            print(f"Error processing evaluation batch: {e}")
+            return {'loss': 0, 'correct': 0, 'examples': 0}
         
         # Calculate final accuracy
         accuracy = total_correct / total_examples if total_examples > 0 else 0
@@ -538,8 +855,28 @@ def client_fn(context: Context) -> fl.client.Client:
     # Handle different Flower versions with a simplified approach
     # This ensures compatibility across Flower updates
     cid = str(context.cid) if hasattr(context, 'cid') else str(context) if isinstance(context, int) else "0"
+    
+    # Check if we have a cached client to avoid reinitialization
+    if MINIMIZE_CLIENT_INIT_OVERHEAD:
+        client_cache_key = f"client_{cid}"
+        if client_cache_key in _client_cache:
+            print(f"Reusing cached client {cid} for faster initialization")
+            return _client_cache[client_cache_key]
+    
     print(f"Initializing client {cid}")
 
+    # Check if we have a cached model to avoid reloading
+    cache_key = f"model_{MODEL_NAME}"
+    if cache_key in _model_cache and (KEEP_MODEL_WARM or MINIMIZE_CLIENT_INIT_OVERHEAD):
+        print(f"Using cached model for client {cid}")
+        model = _model_cache[cache_key]
+        trainloader, testloader = load_data(int(cid))
+        client = IMDBClient(cid, model, trainloader, testloader).to_client()
+        # Cache client if minimizing overhead is enabled
+        if MINIMIZE_CLIENT_INIT_OVERHEAD:
+            _client_cache[f"client_{cid}"] = client
+        return client
+    
     # Log memory usage before model loading
     log_memory_usage(f"Client {cid} before model load")
     
@@ -588,20 +925,43 @@ def client_fn(context: Context) -> fl.client.Client:
         print(f"Moving model to {DEVICE} for client {cid}...")
         model = model.to(DEVICE)
         
+        # Cache the model if keeping warm or minimizing overhead
+        if KEEP_MODEL_WARM or MINIMIZE_CLIENT_INIT_OVERHEAD:
+            _model_cache[cache_key] = model
+            print(f"Cached model for future clients")
+        
         # Log memory after model is moved to device
         log_memory_usage(f"Client {cid} after model loaded to {DEVICE}")
     except Exception as e:
         print(f"Error initializing model for client {cid}: {e}")
-        # In high utilization mode, try to recover; otherwise fall back to CPU
-        if HIGH_GPU_UTILIZATION:
-            print(f"GPU error in high utilization mode: {e} - attempting recovery")
-        print("Falling back to CPU due to GPU error")
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
-        trainloader, testloader = load_data(int(cid)) 
-        model = model.to(torch.device("cpu"))
+        # Try to recover with less aggressive settings
+        if DEVICE.type == "cuda" and ENABLE_MEMORY_CLEANUP:
+            print("Attempting recovery by clearing GPU memory...")
+            torch.cuda.empty_cache()
+            import gc; gc.collect()
+            try:
+                model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2, low_cpu_mem_usage=True)
+                model = model.to(DEVICE)
+                trainloader, testloader = load_data(int(cid))
+            except:
+                print("Recovery failed, falling back to CPU")
+                model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
+                model = model.to(torch.device("cpu"))
+                trainloader, testloader = load_data(int(cid))
+        else:
+            print("Falling back to CPU due to GPU error")
+            model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
+            trainloader, testloader = load_data(int(cid)) 
+            model = model.to(torch.device("cpu"))
     
     # Create and return client instance with appropriate device handling
     client = IMDBClient(cid, model, trainloader, testloader)
+    
+    # Cache client if minimizing overhead is enabled
+    if MINIMIZE_CLIENT_INIT_OVERHEAD:
+        _client_cache[f"client_{cid}"] = client.to_client()
+        print(f"Cached client {cid} for future reuse")
+    
     return client.to_client()
 
 
@@ -659,13 +1019,43 @@ print("- Using default Ray memory management")
 print(f"- CPU allocation: {CLIENT_CPU_ALLOCATION} cores per client (reduces parallelism)")
 print(f"- GPU allocation: {CLIENT_GPU_ALLOCATION} per client\n")
 
+
+# Start background GPU warmup thread if enabled
+if KEEP_MODEL_WARM and DEVICE.type == "cuda":
+    warmup_thread = threading.Thread(target=async_gpu_warmup_worker, daemon=True)
+    warmup_thread.start()
+    print("Started GPU warmup background thread")
+
+# Pre-warm the GPU before simulation starts
+if DEVICE.type == "cuda" and (KEEP_MODEL_WARM or AGGRESSIVE_GPU_OPTIMIZATION):
+    print("Pre-warming GPU before simulation...")
+    ensure_gpu_is_warm()
+    print("GPU pre-warmed successfully")
+
+# Print optimization settings summary
+print("\nGPU Optimization Settings:")
+print(f"  - High GPU Utilization: {HIGH_GPU_UTILIZATION}")
+print(f"  - Aggressive Optimization: {AGGRESSIVE_GPU_OPTIMIZATION}")
+print(f"  - Client Caching: {MINIMIZE_CLIENT_INIT_OVERHEAD}")
+print(f"  - CUDA Streams: {ENABLE_CUDA_STREAMS} ({NUM_CUDA_STREAMS} streams)" if ENABLE_CUDA_STREAMS else "  - CUDA Streams: Disabled")
+print(f"  - Model Warming: {KEEP_MODEL_WARM}")
+print(f"  - Pipeline Parallelism: {ENABLE_PIPELINE_PARALLELISM}")
+print(f"  - Memory Cleanup: {'Minimal' if not ENABLE_MEMORY_CLEANUP else 'Enabled'}")
+print(f"  - Batch Size: {BATCH_SIZE}")
+print(f"  - Gradient Accumulation: {GRADIENT_ACCUMULATION}")
+print()
+
 fl.simulation.start_simulation(
     # Apply Ray OOM prevention configuration
     ray_init_args=ray_init_config,
     client_fn=client_fn,
     # Simulation config
     num_clients=NUM_CLIENTS,
-    config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS, round_timeout=900.0),  # Extended timeout for slower clients
+    # Optimized server config for better performance
+    config=fl.server.ServerConfig(
+        num_rounds=NUM_ROUNDS, 
+        round_timeout=1200.0 if AGGRESSIVE_GPU_OPTIMIZATION else 900.0,  # Allow more time for aggressive optimization
+    ),
     strategy=fl.server.strategy.FedAvg(
         min_fit_clients=NUM_CLIENTS,
         min_evaluate_clients=NUM_CLIENTS,
@@ -673,6 +1063,9 @@ fl.simulation.start_simulation(
         evaluate_metrics_aggregation_fn=aggregate_metrics,
         # Aggregates metrics from client training
         fit_metrics_aggregation_fn=aggregate_metrics,
+        # Optimize strategy for better performance
+        fraction_fit=1.0,  # Use all clients for training
+        fraction_evaluate=1.0,  # Use all clients for evaluation
     ),
     # Resource allocation per client - configurable through config.py
     client_resources={

@@ -115,24 +115,63 @@ USE_CUDA = torch.cuda.is_available()
 # - Smaller batch sizes (32) to prevent out-of-memory errors
 # - Enables frequent memory cleanup and logging for debugging
 # - Uses 50% of available GPU memory for stability
-HIGH_GPU_UTILIZATION = False  # Set to True for maximum GPU utilization (may cause OOM on some systems)
+HIGH_GPU_UTILIZATION = True  # Set to True for maximum GPU utilization (may cause OOM on some systems)
+
+# Advanced GPU optimization settings for maintaining 100% utilization
+AGGRESSIVE_GPU_OPTIMIZATION = True  # Enable most aggressive optimizations
+MINIMIZE_CLIENT_INIT_OVERHEAD = True  # Keep clients alive between rounds
+ENABLE_GPU_MEMORY_POOL = True  # Use memory pool to reduce allocation overhead
+ENABLE_CUDA_STREAMS = True  # Use CUDA streams for better parallelism
+OVERLAP_COMMUNICATION_COMPUTE = True  # Overlap model updates with computation
 
 if HIGH_GPU_UTILIZATION:
     CLIENT_GPU_ALLOCATION = 0.9       # High GPU allocation per client (90% of one GPU)
     CLIENT_CPU_ALLOCATION = 2         # Reduced CPU allocation to allow more parallelism
+    # New optimization settings for minimizing GPU utilization drops
+    ENABLE_ASYNC_OPERATIONS = True    # Enable async data loading and model operations
+    PRELOAD_NEXT_BATCH = True        # Preload next batch while processing current one
+    KEEP_MODEL_WARM = True           # Keep model on GPU between rounds to avoid reloading
+    ENABLE_PIPELINE_PARALLELISM = True # Enable overlapping operations
+    PERSISTENT_WORKERS = True        # Keep dataloader workers alive between epochs
+    PREFETCH_FACTOR = 4              # Number of batches to prefetch
+    NUM_DATALOADER_WORKERS = 4       # Number of parallel data loading workers
     GPU_MEMORY_FRACTION = 0.95        # Use 95% of GPU memory
     BATCH_SIZE = 64                   # Larger batch size for better GPU utilization
-    ENABLE_MEMORY_CLEANUP = False     # Disable frequent memory cleanup
+    ENABLE_MEMORY_CLEANUP = False     # Disable frequent memory cleanup to maintain GPU state
     ENABLE_MEMORY_LOGGING = False     # Disable frequent memory logging
+    # Additional optimizations for maintaining 100% GPU utilization
+    if AGGRESSIVE_GPU_OPTIMIZATION:
+        CLIENT_GPU_ALLOCATION = 0.95   # Even higher GPU allocation for maximum utilization
+        BATCH_SIZE = 128               # Larger batch size for better tensor core utilization
+        PREFETCH_FACTOR = 8            # More aggressive prefetching
+        NUM_DATALOADER_WORKERS = 6     # More workers for data loading parallelism
+        ENABLE_MEMORY_CLEANUP = False  # Never cleanup memory during training
+        GRADIENT_ACCUMULATION = 2      # Use gradient accumulation for larger effective batch sizes
 else:
     CLIENT_GPU_ALLOCATION = 0.5       # Conservative GPU allocation (50% of one GPU)
     CLIENT_CPU_ALLOCATION = 3         # Higher CPU allocation for stability
+    # Conservative async settings
+    ENABLE_ASYNC_OPERATIONS = False   # Disable async operations for stability
+    PRELOAD_NEXT_BATCH = False       # Disable preloading for simpler debugging
+    KEEP_MODEL_WARM = False          # Allow model to be moved off GPU for memory
+    ENABLE_PIPELINE_PARALLELISM = False # Disable overlapping for simpler execution
+    PERSISTENT_WORKERS = False       # Don't keep workers alive to save memory
+    PREFETCH_FACTOR = 2              # Smaller prefetch for memory conservation
+    NUM_DATALOADER_WORKERS = 2       # Fewer workers to reduce memory usage
     GPU_MEMORY_FRACTION = 0.5         # Conservative memory usage (50% of GPU memory)
     BATCH_SIZE = 32                   # Smaller batch size for memory safety
     ENABLE_MEMORY_CLEANUP = True      # Enable frequent memory cleanup
     ENABLE_MEMORY_LOGGING = True      # Enable frequent memory logging
 
-GRADIENT_ACCUMULATION = 1     # Number of batches to accumulate gradients over
+# Initialize gradient accumulation if not set above
+if 'GRADIENT_ACCUMULATION' not in locals():
+    GRADIENT_ACCUMULATION = 1     # Number of batches to accumulate gradients over
+
+# CUDA Streams configuration for better parallelism
+if ENABLE_CUDA_STREAMS and USE_CUDA:
+    NUM_CUDA_STREAMS = 4  # Number of CUDA streams for parallel operations
+else:
+    NUM_CUDA_STREAMS = 1
 
 # Configure device (GPU or CPU)
 if USE_CUDA and not FORCE_CPU:
@@ -140,6 +179,13 @@ if USE_CUDA and not FORCE_CPU:
     try:
         # Limit memory usage to specified fraction per process
         torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)
+        # Enable memory pool for faster allocation/deallocation if supported
+        if ENABLE_GPU_MEMORY_POOL and hasattr(torch.cuda, 'memory_pool'):
+            try:
+                torch.cuda.memory._set_memory_pool_options(backend='native')
+                print(f"Enabled CUDA memory pool for faster allocation")
+            except:
+                pass  # Memory pool not available in this PyTorch version
         print(f"Using GPU with {GPU_MEMORY_FRACTION*100:.0f}% memory allocation per process ({'High Utilization' if HIGH_GPU_UTILIZATION else 'Conservative'} mode)")
     except Exception as e:
         print(f"Warning: Could not set GPU memory fraction: {e}")
