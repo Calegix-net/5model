@@ -1,4 +1,7 @@
 import os
+
+# Improve CUDA allocation to reduce fragmentation
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # Timestamp functionality for all print statements
 import datetime
 import builtins
@@ -135,7 +138,7 @@ if HIGH_GPU_UTILIZATION:
     PERSISTENT_WORKERS = True        # Keep dataloader workers alive between epochs
     PREFETCH_FACTOR = 4              # Number of batches to prefetch
     NUM_DATALOADER_WORKERS = 4       # Number of parallel data loading workers
-    GPU_MEMORY_FRACTION = 0.95        # Use 95% of GPU memory
+    GPU_MEMORY_FRACTION = 0.99        # Start with 99% GPU memory
     BATCH_SIZE = 64                   # Larger batch size for better GPU utilization
     ENABLE_MEMORY_CLEANUP = False     # Disable frequent memory cleanup to maintain GPU state
     ENABLE_MEMORY_LOGGING = False     # Disable frequent memory logging
@@ -146,7 +149,7 @@ if HIGH_GPU_UTILIZATION:
         PREFETCH_FACTOR = 8            # More aggressive prefetching
         NUM_DATALOADER_WORKERS = 6     # More workers for data loading parallelism
         ENABLE_MEMORY_CLEANUP = False  # Never cleanup memory during training
-        GRADIENT_ACCUMULATION = 2      # Use gradient accumulation for larger effective batch sizes
+    GRADIENT_ACCUMULATION = 2      # Use gradient accumulation for larger effective batch sizes
 else:
     CLIENT_GPU_ALLOCATION = 0.5       # Conservative GPU allocation (50% of one GPU)
     CLIENT_CPU_ALLOCATION = 3         # Higher CPU allocation for stability
@@ -162,6 +165,9 @@ else:
     BATCH_SIZE = 32                   # Smaller batch size for memory safety
     ENABLE_MEMORY_CLEANUP = True      # Enable frequent memory cleanup
     ENABLE_MEMORY_LOGGING = True      # Enable frequent memory logging
+
+# Track current memory fraction so it can be adjusted dynamically
+CURRENT_GPU_MEMORY_FRACTION = GPU_MEMORY_FRACTION
 
 # Initialize gradient accumulation if not set above
 if 'GRADIENT_ACCUMULATION' not in locals():
@@ -179,6 +185,7 @@ if USE_CUDA and not FORCE_CPU:
     try:
         # Limit memory usage to specified fraction per process
         torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)
+        CURRENT_GPU_MEMORY_FRACTION = GPU_MEMORY_FRACTION
         # Enable memory pool for faster allocation/deallocation if supported
         if ENABLE_GPU_MEMORY_POOL and hasattr(torch.cuda, 'memory_pool'):
             try:
@@ -195,6 +202,22 @@ else:
     # Fallback to CPU
     DEVICE = torch.device("cpu")
     print("Using CPU for computation (CUDA not available or disabled)")
+
+# ------------------------------------------------------------------
+# Dynamic GPU memory adjustment helpers
+# ------------------------------------------------------------------
+def reduce_gpu_memory_fraction(step: float = 0.05) -> None:
+    """Reduce allowed GPU memory fraction to avoid OOM."""
+    global CURRENT_GPU_MEMORY_FRACTION
+    if DEVICE.type == "cuda":
+        new_fraction = max(0.5, CURRENT_GPU_MEMORY_FRACTION - step)
+        if new_fraction < CURRENT_GPU_MEMORY_FRACTION:
+            try:
+                torch.cuda.set_per_process_memory_fraction(new_fraction)
+                CURRENT_GPU_MEMORY_FRACTION = new_fraction
+                print(f"Adjusted GPU memory fraction to {new_fraction:.2f}")
+            except Exception as exc:
+                print(f"Could not adjust GPU memory fraction: {exc}")
 
 MODEL_NAME = "distilbert-base-uncased"
 

@@ -35,8 +35,9 @@ from config import (
     # Import GPU optimization toggles
     HIGH_GPU_UTILIZATION, ENABLE_MEMORY_CLEANUP, ENABLE_MEMORY_LOGGING,
     # Import advanced optimization settings
-    AGGRESSIVE_GPU_OPTIMIZATION, MINIMIZE_CLIENT_INIT_OVERHEAD, 
-    ENABLE_CUDA_STREAMS, NUM_CUDA_STREAMS, OVERLAP_COMMUNICATION_COMPUTE
+    AGGRESSIVE_GPU_OPTIMIZATION, MINIMIZE_CLIENT_INIT_OVERHEAD,
+    ENABLE_CUDA_STREAMS, NUM_CUDA_STREAMS, OVERLAP_COMMUNICATION_COMPUTE,
+    reduce_gpu_memory_fraction
 )
 
 # -----------------------------------------------------------------------------
@@ -620,6 +621,8 @@ class IMDBClient(fl.client.NumPyClient):
 
         except Exception as e:
             print(f"Error during training on client {self.cid}: {e}")
+            if "CUDA out of memory" in str(e):
+                reduce_gpu_memory_fraction()
             # Try to recover and continue (only if memory cleanup is enabled)
             if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
                 torch.cuda.empty_cache()
@@ -669,6 +672,10 @@ class IMDBClient(fl.client.NumPyClient):
                 return self._process_batch_standard(batch, optimizer, accumulation_steps, batch_count)
         except Exception as e:
             print(f"Error processing batch: {e}")
+            if "CUDA out of memory" in str(e):
+                reduce_gpu_memory_fraction()
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
             return {'loss': 0, 'examples': 0}
     
     def _process_batch_with_stream(self, batch, optimizer, accumulation_steps, batch_count):
@@ -803,6 +810,29 @@ class IMDBClient(fl.client.NumPyClient):
                         total_examples += result['examples']
             except Exception as e:
                 print(f"Error during evaluation on client {self.cid}: {e}")
+                if "CUDA out of memory" in str(e):
+                    reduce_gpu_memory_fraction()
+                    if self.device.type == "cuda":
+                        torch.cuda.empty_cache()
+
+        # Calculate final accuracy
+        accuracy = total_correct / total_examples if total_examples > 0 else 0
+        global_accuracy.append(accuracy)
+
+        # Memory optimization: Free memory after evaluation completion
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
+            torch.cuda.empty_cache()
+            # Force garbage collection
+            import gc; gc.collect()
+            log_memory_usage(f"Client {self.cid} after evaluate")
+        elif self.device.type == "cuda":
+            log_memory_usage(f"Client {self.cid} after evaluate")
+
+        return (
+            float(total_loss / total_examples),
+            total_examples,
+            {"accuracy": accuracy},
+        )
         
     def _process_evaluation_batch(self, batch):
         """Process a single evaluation batch."""
@@ -833,26 +863,12 @@ class IMDBClient(fl.client.NumPyClient):
             }
         except Exception as e:
             print(f"Error processing evaluation batch: {e}")
+            if "CUDA out of memory" in str(e):
+                reduce_gpu_memory_fraction()
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
             return {'loss': 0, 'correct': 0, 'examples': 0}
-        
-        # Calculate final accuracy
-        accuracy = total_correct / total_examples if total_examples > 0 else 0
-        global_accuracy.append(accuracy)
-        
-        # Memory optimization: Free memory after evaluation completion
-        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
-            torch.cuda.empty_cache()
-            # Force garbage collection
-            import gc; gc.collect()
-            log_memory_usage(f"Client {self.cid} after evaluate")
-        elif self.device.type == "cuda":
-            log_memory_usage(f"Client {self.cid} after evaluate")
-            
-        return (
-            float(total_loss / total_examples),
-            total_examples,
-            {"accuracy": accuracy},
-        )
+
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
