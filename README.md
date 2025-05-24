@@ -64,6 +64,8 @@ The project uses a centralized configuration system in `config.py`. Key configur
 - `ENABLE_MALICIOUS_NODES`: Enable/disable malicious node simulation
 - `ATTACK_TYPE`: Type of attack to simulate
 - `MALICIOUS_NODE_RATIO`: Percentage of malicious nodes
+- `ENABLE_CUDA_STREAMS`: Use CUDA streams for parallelism (streams are now
+  created lazily to avoid Ray serialization errors)
 
 ## Project Structure
 
@@ -113,6 +115,13 @@ The project generates several CSV files containing experimental results:
 - `combined_dataset_normal.csv`: Results from normal (non-malicious) runs
 - `dataset_random_*.csv`: Results with randomized attack patterns
 - `dataset_normal.csv`: Baseline normal dataset
+
+## Troubleshooting
+
+If you encounter an error similar to `cannot pickle 'Stream' object` when running
+the simulation with Ray, upgrade to the latest code or ensure the environment
+uses the lazy CUDA stream initialisation in `main.py`. This avoids Ray
+serialization issues when `ENABLE_CUDA_STREAMS` is enabled.
 
 ## License
 
