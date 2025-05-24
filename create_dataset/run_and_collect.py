@@ -55,6 +55,7 @@ from config import (
     CLIENT_GPU_ALLOCATION,
     BATCH_SIZE,
     MALICIOUS_NODE_RATIO,
+    HIGH_GPU_UTILIZATION,
 )
 
 # Suppress specific numpy warnings that don't affect the correctness of results
@@ -95,7 +96,7 @@ def print_config_info():
         print(f"Malicious node ratio: {MALICIOUS_NODE_RATIO}")
 
     # Print memory configuration for reference
-    print(f"Using {'CPU only' if FORCE_CPU else 'GPU with ' + str(CLIENT_GPU_ALLOCATION*100) + '% allocation per client'}")
+    print(f"Using {'CPU only' if FORCE_CPU else 'GPU with ' + str(CLIENT_GPU_ALLOCATION*100) + '% allocation per client (' + ('High Utilization' if HIGH_GPU_UTILIZATION else 'Conservative') + ' mode)'}")
     print(f"Batch size: {BATCH_SIZE}")
 
     print(f"Output dataset file: {FINAL_DATASET_FILE}")

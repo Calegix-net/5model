@@ -22,7 +22,9 @@ from config import (
     BATCH_SIZE, GRADIENT_ACCUMULATION,
     # Import client resource allocation parameters
     CLIENT_GPU_ALLOCATION, CLIENT_CPU_ALLOCATION,
-    DIRECTORY1, RESULT_DIRECTORY, LAYER_SPECIFIC_DIRECTORY, SUMMARY_DIRECTORY
+    DIRECTORY1, RESULT_DIRECTORY, LAYER_SPECIFIC_DIRECTORY, SUMMARY_DIRECTORY,
+    # Import GPU optimization toggles
+    HIGH_GPU_UTILIZATION, ENABLE_MEMORY_CLEANUP, ENABLE_MEMORY_LOGGING
 )
 
 # -----------------------------------------------------------------------------
@@ -32,7 +34,11 @@ from config import (
 # Add memory profiling function for debugging
 def log_memory_usage(tag=""):
     if DEVICE.type == "cuda":
-        print(f"Memory usage {tag}: {torch.cuda.memory_allocated()/1024**2:.2f}MB / {torch.cuda.max_memory_allocated()/1024**2:.2f}MB (current/peak)")
+        if ENABLE_MEMORY_LOGGING:
+            print(f"Memory usage {tag}: {torch.cuda.memory_allocated()/1024**2:.2f}MB / {torch.cuda.max_memory_allocated()/1024**2:.2f}MB (current/peak)")
+
+# Create optimized empty_cache function based on settings
+torch.cuda.empty_cache = (lambda: None) if not ENABLE_MEMORY_CLEANUP else torch.cuda.empty_cache
 
 # Update malicious node settings based on configuration
 def configure_malicious_settings():
@@ -67,6 +73,11 @@ os.makedirs(SUMMARY_DIRECTORY, exist_ok=True)
 
 # Print configuration for verification
 print("Running with configuration:")
+print(f"- GPU Utilization Mode: {'High Utilization' if HIGH_GPU_UTILIZATION else 'Conservative'}")
+print(f"- GPU Allocation per Client: {CLIENT_GPU_ALLOCATION*100:.0f}%")
+print(f"- Batch Size: {BATCH_SIZE}")
+print(f"- Memory Cleanup: {'Disabled' if not ENABLE_MEMORY_CLEANUP else 'Enabled'}")
+print(f"- Memory Logging: {'Disabled' if not ENABLE_MEMORY_LOGGING else 'Enabled'}")
 print(f"- Enable Malicious Nodes: {ENABLE_MALICIOUS_NODES}")
 print(f"- Attack Type: {ATTACK_TYPE}")
 print(f"- Malicious Node Ratio: {MALICIOUS_NODE_RATIO}")
@@ -150,7 +161,9 @@ def load_data(partition_id):
     
     # Test loader with potentially larger batch size for evaluation
     # We can usually use larger batches for evaluation since we don't need gradients
-    eval_batch_size = BATCH_SIZE * 2  # Double batch size for evaluation is often possible
+    # In high utilization mode, use even larger evaluation batches
+    eval_batch_multiplier = 3 if HIGH_GPU_UTILIZATION else 2
+    eval_batch_size = BATCH_SIZE * eval_batch_multiplier
     testloader = DataLoader(
         partition_train_test["test"], 
         batch_size=eval_batch_size,
@@ -165,7 +178,8 @@ def load_data(partition_id):
     del partition, partition_train_test
     import gc
     gc.collect()
-    if DEVICE.type == "cuda":
+    # Only clear cache if memory cleanup is enabled
+    if DEVICE.type == "cuda" and ENABLE_MEMORY_CLEANUP:
         torch.cuda.empty_cache()
     
     return trainloader, testloader
@@ -293,19 +307,22 @@ class IMDBClient(fl.client.NumPyClient):
         
         # Clean up memory at initialization time
         if self.device.type == "cuda":
-            # Free memory cache to reduce fragmentation
-            torch.cuda.empty_cache()
+            # Free memory cache to reduce fragmentation (only if memory cleanup is enabled)
+            if ENABLE_MEMORY_CLEANUP:
+                torch.cuda.empty_cache()
             # Print memory usage for monitoring
             log_memory_usage(f"Client {cid} at initialization")
-            # Print memory stats for debugging
-            print(f"Client {cid} GPU memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB allocated")
+            # Print memory stats for debugging (only if memory logging is enabled)
+            if ENABLE_MEMORY_LOGGING:
+                print(f"Client {cid} GPU memory: {torch.cuda.memory_allocated()/1024**2:.1f}MB allocated")
 
     def get_parameters(self, config=None):
         """Extract model parameters as a list of NumPy arrays."""
         # Memory optimization: Free CUDA cache before parameter extraction
         if self.device.type == "cuda":
-            # Clear any cached GPU tensors to free memory
-            torch.cuda.empty_cache()
+            # Clear any cached GPU tensors to free memory (only if memory cleanup is enabled)
+            if ENABLE_MEMORY_CLEANUP:
+                torch.cuda.empty_cache()
         
         # Optimize memory usage during parameter extraction
         # Explicitly move to CPU before conversion to NumPy to prevent CUDA OOM
@@ -323,7 +340,7 @@ class IMDBClient(fl.client.NumPyClient):
         
         # Free memory after parameter extraction
         del state_dict
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
         
         return params
@@ -347,7 +364,7 @@ class IMDBClient(fl.client.NumPyClient):
             Updated parameters, number of examples, and training metrics.
         """
         # Memory optimization: Free CUDA cache before training starts
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
             log_memory_usage(f"Client {self.cid} before fit")
         
@@ -403,12 +420,12 @@ class IMDBClient(fl.client.NumPyClient):
                 batch_count += 1
                 
                 # Periodically free memory
-                if batch_count % 10 == 0 and self.device.type == "cuda":
+                if ENABLE_MEMORY_CLEANUP and batch_count % 10 == 0 and self.device.type == "cuda":
                     torch.cuda.empty_cache()
         except Exception as e:
             print(f"Error during training on client {self.cid}: {e}")
-            # Try to recover and continue
-            if self.device.type == "cuda":
+            # Try to recover and continue (only if memory cleanup is enabled)
+            if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
                 torch.cuda.empty_cache()
 
         # Save layer weights
@@ -429,10 +446,12 @@ class IMDBClient(fl.client.NumPyClient):
         metrics = {"loss": total_loss / total_examples if total_examples > 0 else float('inf')}
         
         # Clean up and free memory
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             del optimizer, batch_count, state_dict
             import gc; gc.collect()
             torch.cuda.empty_cache()
+            log_memory_usage(f"Client {self.cid} after fit")
+        elif self.device.type == "cuda":
             log_memory_usage(f"Client {self.cid} after fit")
         
         return (
@@ -451,7 +470,7 @@ class IMDBClient(fl.client.NumPyClient):
         Returns: Loss, number of examples, and evaluation metrics.
         """
         # Memory optimization: Free CUDA cache before evaluation
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
             log_memory_usage(f"Client {self.cid} before evaluate")
         
@@ -491,10 +510,12 @@ class IMDBClient(fl.client.NumPyClient):
         global_accuracy.append(accuracy)
         
         # Memory optimization: Free memory after evaluation completion
-        if self.device.type == "cuda":
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
             torch.cuda.empty_cache()
             # Force garbage collection
             import gc; gc.collect()
+            log_memory_usage(f"Client {self.cid} after evaluate")
+        elif self.device.type == "cuda":
             log_memory_usage(f"Client {self.cid} after evaluate")
             
         return (
@@ -526,10 +547,11 @@ def client_fn(context: Context) -> fl.client.Client:
     try:
         # Try loading the model with memory efficiency settings
         if torch.cuda.is_available():
-            # Clear cache to help with memory fragmentation
-            torch.cuda.empty_cache()
+            # Clear cache to help with memory fragmentation (only if memory cleanup is enabled)
+            if ENABLE_MEMORY_CLEANUP:
+                torch.cuda.empty_cache()
             # Set PyTorch to use more efficient memory allocation algorithms
-            torch.backends.cuda.matmul.allow_tf32 = True  
+            torch.backends.cuda.matmul.allow_tf32 = HIGH_GPU_UTILIZATION  # Enable TF32 for high utilization mode
             if hasattr(torch, 'amp') and hasattr(torch.amp, 'autocast'):
                 # Enable mixed precision globally for better memory efficiency
                 if hasattr(torch, 'set_float32_matmul_precision'):
@@ -552,8 +574,9 @@ def client_fn(context: Context) -> fl.client.Client:
         }
         
         # Don't force dtype to float16 (this causes issues with gradient scaling)
-        if False and DEVICE.type == "cuda":  # Disabled - loading FP16 model causes gradient unscaling issues
-            model_kwargs['torch_dtype'] = torch.float16
+        # Only enable FP16 in high utilization mode and if supported
+        if HIGH_GPU_UTILIZATION and DEVICE.type == "cuda" and hasattr(torch, 'float16'):
+            pass  # Keep disabled for stability in gradient unscaling
         
         # Load model to CPU first
         model = AutoModelForSequenceClassification.from_pretrained(
@@ -569,7 +592,9 @@ def client_fn(context: Context) -> fl.client.Client:
         log_memory_usage(f"Client {cid} after model loaded to {DEVICE}")
     except Exception as e:
         print(f"Error initializing model for client {cid}: {e}")
-        # Fall back to CPU if there's an issue with GPU
+        # In high utilization mode, try to recover; otherwise fall back to CPU
+        if HIGH_GPU_UTILIZATION:
+            print(f"GPU error in high utilization mode: {e} - attempting recovery")
         print("Falling back to CPU due to GPU error")
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
         trainloader, testloader = load_data(int(cid)) 

@@ -100,17 +100,38 @@ USE_CUDA = torch.cuda.is_available()
 # - To disable worker killing, set RAY_memory_monitor_refresh_ms=0
 # -----------------------------------------------------------------------------
 # GPU and CPU resource allocation per client (used in fl.simulation.start_simulation)
-CLIENT_GPU_ALLOCATION = 0.5       # Fraction of GPU allocated per client (0.1 = 10% of one GPU)
-CLIENT_CPU_ALLOCATION = 3     # Number of CPUs allocated per client
 
-# Memory optimization settings
-## notes:
-# next run increase batchsize to 16 or 32
-# decrease gradient-accum to 1
-# we can afford this because of 16gb of vram
+# GPU Utilization Mode - Toggle between conservative and high utilization settings
+# Set to True for maximum GPU utilization, False for memory-conservative approach
 #
-GPU_MEMORY_FRACTION = 0.5     # Limit memory usage per process (0.1 = 10% of GPU memory)
-BATCH_SIZE = 16                # Batch size for training and evaluation
+# HIGH UTILIZATION MODE (HIGH_GPU_UTILIZATION = True):
+# - Uses 90% GPU allocation per client for maximum throughput
+# - Larger batch sizes (64) and evaluation batches for better GPU core utilization
+# - Disables frequent memory cleanup to reduce GPU ramping up/down
+# - Uses 95% of available GPU memory
+#
+# CONSERVATIVE MODE (HIGH_GPU_UTILIZATION = False):
+# - Uses 50% GPU allocation per client for safer memory usage
+# - Smaller batch sizes (32) to prevent out-of-memory errors
+# - Enables frequent memory cleanup and logging for debugging
+# - Uses 50% of available GPU memory for stability
+HIGH_GPU_UTILIZATION = False  # Set to True for maximum GPU utilization (may cause OOM on some systems)
+
+if HIGH_GPU_UTILIZATION:
+    CLIENT_GPU_ALLOCATION = 0.9       # High GPU allocation per client (90% of one GPU)
+    CLIENT_CPU_ALLOCATION = 2         # Reduced CPU allocation to allow more parallelism
+    GPU_MEMORY_FRACTION = 0.95        # Use 95% of GPU memory
+    BATCH_SIZE = 64                   # Larger batch size for better GPU utilization
+    ENABLE_MEMORY_CLEANUP = False     # Disable frequent memory cleanup
+    ENABLE_MEMORY_LOGGING = False     # Disable frequent memory logging
+else:
+    CLIENT_GPU_ALLOCATION = 0.5       # Conservative GPU allocation (50% of one GPU)
+    CLIENT_CPU_ALLOCATION = 3         # Higher CPU allocation for stability
+    GPU_MEMORY_FRACTION = 0.5         # Conservative memory usage (50% of GPU memory)
+    BATCH_SIZE = 32                   # Smaller batch size for memory safety
+    ENABLE_MEMORY_CLEANUP = True      # Enable frequent memory cleanup
+    ENABLE_MEMORY_LOGGING = True      # Enable frequent memory logging
+
 GRADIENT_ACCUMULATION = 1     # Number of batches to accumulate gradients over
 
 # Configure device (GPU or CPU)
@@ -119,7 +140,7 @@ if USE_CUDA and not FORCE_CPU:
     try:
         # Limit memory usage to specified fraction per process
         torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION)
-        print(f"Using GPU with {GPU_MEMORY_FRACTION*100}% memory allocation per process")
+        print(f"Using GPU with {GPU_MEMORY_FRACTION*100:.0f}% memory allocation per process ({'High Utilization' if HIGH_GPU_UTILIZATION else 'Conservative'} mode)")
     except Exception as e:
         print(f"Warning: Could not set GPU memory fraction: {e}")
         print("Continuing with default GPU memory management.")
