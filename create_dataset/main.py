@@ -37,7 +37,8 @@ from config import (
     # Import advanced optimization settings
     AGGRESSIVE_GPU_OPTIMIZATION, MINIMIZE_CLIENT_INIT_OVERHEAD,
     ENABLE_CUDA_STREAMS, NUM_CUDA_STREAMS, OVERLAP_COMMUNICATION_COMPUTE,
-    reduce_gpu_memory_fraction
+    reduce_gpu_memory_fraction, increase_gpu_memory_fraction,
+    auto_adjust_gpu_memory_fraction
 )
 
 # -----------------------------------------------------------------------------
@@ -653,6 +654,9 @@ class IMDBClient(fl.client.NumPyClient):
         elif self.device.type == "cuda":
             log_memory_usage(f"Client {self.cid} after fit")
 
+        if self.device.type == "cuda":
+            auto_adjust_gpu_memory_fraction()
+
         return (
             self.get_parameters(),
             total_examples,
@@ -827,6 +831,9 @@ class IMDBClient(fl.client.NumPyClient):
             log_memory_usage(f"Client {self.cid} after evaluate")
         elif self.device.type == "cuda":
             log_memory_usage(f"Client {self.cid} after evaluate")
+
+        if self.device.type == "cuda":
+            auto_adjust_gpu_memory_fraction()
 
         return (
             float(total_loss / total_examples),

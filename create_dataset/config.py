@@ -219,6 +219,34 @@ def reduce_gpu_memory_fraction(step: float = 0.05) -> None:
             except Exception as exc:
                 print(f"Could not adjust GPU memory fraction: {exc}")
 
+def increase_gpu_memory_fraction(step: float = 0.05) -> None:
+    """Increase GPU memory fraction when additional memory is available."""
+    global CURRENT_GPU_MEMORY_FRACTION
+    if DEVICE.type == "cuda":
+        new_fraction = min(GPU_MEMORY_FRACTION, CURRENT_GPU_MEMORY_FRACTION + step)
+        if new_fraction > CURRENT_GPU_MEMORY_FRACTION:
+            try:
+                torch.cuda.set_per_process_memory_fraction(new_fraction)
+                CURRENT_GPU_MEMORY_FRACTION = new_fraction
+                print(f"Increased GPU memory fraction to {new_fraction:.2f}")
+            except Exception as exc:
+                print(f"Could not increase GPU memory fraction: {exc}")
+
+def auto_adjust_gpu_memory_fraction(lower: float = 0.6, upper: float = 0.85, step: float = 0.05) -> None:
+    """Dynamically adjust GPU memory fraction based on utilisation."""
+    if DEVICE.type != "cuda":
+        return
+    total = torch.cuda.get_device_properties(0).total_memory
+    allowed = total * CURRENT_GPU_MEMORY_FRACTION
+    allocated = torch.cuda.memory_allocated()
+    if allowed == 0:
+        return
+    usage = allocated / allowed
+    if usage > upper:
+        reduce_gpu_memory_fraction(step)
+    elif usage < lower and CURRENT_GPU_MEMORY_FRACTION < GPU_MEMORY_FRACTION:
+        increase_gpu_memory_fraction(step)
+
 MODEL_NAME = "distilbert-base-uncased"
 
 # Directory setup based on configuration
