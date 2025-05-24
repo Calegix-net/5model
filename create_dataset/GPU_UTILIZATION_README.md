@@ -182,3 +182,16 @@ The system will automatically print the current mode and settings when it starts
 | Aggressive | 95-100% | 2.0-3.0x | 95% GPU + RAM | Lower |
 
 The aggressive mode aims to maintain sustained 95-100% GPU utilization by eliminating idle time between operations through advanced parallelism and caching strategies.
+
+## GPU Job Scheduler
+
+A new script `gpu_scheduler.py` is provided to help schedule multiple training jobs without exhausting GPU memory. It launches jobs only when enough GPU (or system) memory is available.
+
+### Usage
+
+```bash
+# Run 4 training jobs with an estimated 50% GPU memory usage each
+python gpu_scheduler.py main.py --num_jobs 4 --job_memory 0.5
+```
+
+Jobs are started when the current memory utilisation plus the job estimate does not exceed the configured maximum (90% by default). If no GPU is available the scheduler falls back to system RAM utilisation.
