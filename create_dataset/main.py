@@ -130,10 +130,21 @@ _dataloader_cache = {}
 _client_cache = {}
 
 # CUDA streams for better parallelism
-_cuda_streams = []
-if ENABLE_CUDA_STREAMS and DEVICE.type == "cuda":
-    _cuda_streams = [torch.cuda.Stream() for _ in range(NUM_CUDA_STREAMS)]
-    print(f"Initialized {NUM_CUDA_STREAMS} CUDA streams for parallel operations")
+# CUDA streams are created lazily to avoid serialization issues with Ray
+_cuda_streams = None
+
+def _init_cuda_streams():
+    """Initialize CUDA streams on demand.
+
+    Streams are created inside the worker process rather than at module import
+    time so that no non-serialisable objects are present when Ray serialises
+    this module.  This function is idempotent and can safely be called multiple
+    times.
+    """
+    global _cuda_streams
+    if _cuda_streams is None and ENABLE_CUDA_STREAMS and DEVICE.type == "cuda":
+        _cuda_streams = [torch.cuda.Stream() for _ in range(NUM_CUDA_STREAMS)]
+        print(f"Initialized {NUM_CUDA_STREAMS} CUDA streams for parallel operations")
 
 # Global GPU warmup state
 _gpu_warmup_active = False
@@ -154,6 +165,7 @@ def ensure_gpu_is_warm():
                     _ = torch.mm(dummy_tensor, dummy_tensor.T)
                     _ = torch.nn.functional.relu(dummy_tensor)
                 # Use different streams if available
+                _init_cuda_streams()
                 if _cuda_streams:
                     for i, stream in enumerate(_cuda_streams[:2]):
                         with torch.cuda.stream(stream):
@@ -390,6 +402,7 @@ class IMDBClient(fl.client.NumPyClient):
         
         # Advanced GPU optimization features
         self.cuda_stream = None
+        _init_cuda_streams()
         if ENABLE_CUDA_STREAMS and DEVICE.type == "cuda" and _cuda_streams:
             # Assign a CUDA stream to this client for parallel operations 
             self.cuda_stream = _cuda_streams[int(cid) % len(_cuda_streams)]
