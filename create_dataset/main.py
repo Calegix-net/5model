@@ -269,7 +269,13 @@ def create_model() -> torch.nn.Module:
 # -----------------------------------------------------------------------------
 
 def client_fn(context: Context) -> fl.client.Client:  # noqa: C901 – long but clear
-    cid = str(context.cid)
+    cid = (
+        str(context.cid)
+        if hasattr(context, "cid")
+        else str(context)
+        if isinstance(context, int)
+        else "0"
+    )
     model = create_model()
     trainloader, testloader = load_data(int(cid))
     return IMDBClient(cid, model, trainloader, testloader).to_client()
