@@ -803,6 +803,25 @@ class IMDBClient(fl.client.NumPyClient):
                         total_examples += result['examples']
             except Exception as e:
                 print(f"Error during evaluation on client {self.cid}: {e}")
+
+        # Calculate final accuracy
+        accuracy = total_correct / total_examples if total_examples > 0 else 0
+        global_accuracy.append(accuracy)
+
+        # Memory optimization: Free memory after evaluation completion
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
+            torch.cuda.empty_cache()
+            # Force garbage collection
+            import gc; gc.collect()
+            log_memory_usage(f"Client {self.cid} after evaluate")
+        elif self.device.type == "cuda":
+            log_memory_usage(f"Client {self.cid} after evaluate")
+
+        return (
+            float(total_loss / total_examples),
+            total_examples,
+            {"accuracy": accuracy},
+        )
         
     def _process_evaluation_batch(self, batch):
         """Process a single evaluation batch."""
@@ -834,25 +853,7 @@ class IMDBClient(fl.client.NumPyClient):
         except Exception as e:
             print(f"Error processing evaluation batch: {e}")
             return {'loss': 0, 'correct': 0, 'examples': 0}
-        
-        # Calculate final accuracy
-        accuracy = total_correct / total_examples if total_examples > 0 else 0
-        global_accuracy.append(accuracy)
-        
-        # Memory optimization: Free memory after evaluation completion
-        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
-            torch.cuda.empty_cache()
-            # Force garbage collection
-            import gc; gc.collect()
-            log_memory_usage(f"Client {self.cid} after evaluate")
-        elif self.device.type == "cuda":
-            log_memory_usage(f"Client {self.cid} after evaluate")
-            
-        return (
-            float(total_loss / total_examples),
-            total_examples,
-            {"accuracy": accuracy},
-        )
+
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
