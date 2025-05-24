@@ -874,7 +874,17 @@ def client_fn(context: Context) -> fl.client.Client:
         client_cache_key = f"client_{cid}"
         if client_cache_key in _client_cache:
             print(f"Reusing cached client {cid} for faster initialization")
-            return _client_cache[client_cache_key]
+            client = _client_cache[client_cache_key]
+            # Lazily initialise CUDA streams in case this worker was restarted
+            _init_cuda_streams()
+            if (
+                ENABLE_CUDA_STREAMS
+                and DEVICE.type == "cuda"
+                and getattr(client.numpy_client, "cuda_stream", None) is None
+                and _cuda_streams
+            ):
+                client.numpy_client.cuda_stream = _cuda_streams[int(cid) % len(_cuda_streams)]
+            return client
     
     print(f"Initializing client {cid}")
 
@@ -1033,17 +1043,8 @@ print(f"- CPU allocation: {CLIENT_CPU_ALLOCATION} cores per client (reduces para
 print(f"- GPU allocation: {CLIENT_GPU_ALLOCATION} per client\n")
 
 
-# Start background GPU warmup thread if enabled
-if KEEP_MODEL_WARM and DEVICE.type == "cuda":
-    warmup_thread = threading.Thread(target=async_gpu_warmup_worker, daemon=True)
-    warmup_thread.start()
-    print("Started GPU warmup background thread")
-
-# Pre-warm the GPU before simulation starts
-if DEVICE.type == "cuda" and (KEEP_MODEL_WARM or AGGRESSIVE_GPU_OPTIMIZATION):
-    print("Pre-warming GPU before simulation...")
-    ensure_gpu_is_warm()
-    print("GPU pre-warmed successfully")
+# Skip GPU warmup on the driver to avoid creating CUDA streams before Ray
+# serializes this module. Streams are initialized lazily inside each worker.
 
 # Print optimization settings summary
 print("\nGPU Optimization Settings:")
