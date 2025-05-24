@@ -624,6 +624,38 @@ class IMDBClient(fl.client.NumPyClient):
             if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
                 torch.cuda.empty_cache()
 
+        # Save layer weights
+        # Optimize file saving to reduce I/O overhead
+        with torch.no_grad():  # Ensure no gradients are tracked during file operations
+            state_dict = self.model.state_dict()
+            # Use a batch approach to save layer weights more efficiently
+            save_count = 0
+            for layer_name, weight in state_dict.items():
+                if ".weight" in layer_name:
+                    # Use optimized weight saving function instead of direct file I/O
+                    save_weight_efficiently(weight, layer_name, self.cid)
+                    save_count += 1
+
+            print(f"Saved {save_count} layer weights for client {self.cid}")
+
+        # Calculate metrics
+        metrics = {"loss": total_loss / total_examples if total_examples > 0 else float('inf')}
+
+        # Clean up and free memory
+        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
+            del optimizer, batch_count, state_dict
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
+            log_memory_usage(f"Client {self.cid} after fit")
+        elif self.device.type == "cuda":
+            log_memory_usage(f"Client {self.cid} after fit")
+
+        return (
+            self.get_parameters(),
+            total_examples,
+            metrics
+        )
+
     def _process_training_batch(self, batch, optimizer, accumulation_steps, batch_count):
         """Process a single training batch with optimizations."""
         try:
@@ -712,38 +744,6 @@ class IMDBClient(fl.client.NumPyClient):
             'loss': loss.item() * accumulation_steps,
             'examples': batch["input_ids"].size(0)
         }
-
-        # Save layer weights
-        # Optimize file saving to reduce I/O overhead
-        with torch.no_grad():  # Ensure no gradients are tracked during file operations
-            state_dict = self.model.state_dict()
-            # Use a batch approach to save layer weights more efficiently
-            save_count = 0
-            for layer_name, weight in state_dict.items():
-                if ".weight" in layer_name:
-                    # Use optimized weight saving function instead of direct file I/O
-                    save_weight_efficiently(weight, layer_name, self.cid)
-                    save_count += 1
-            
-            print(f"Saved {save_count} layer weights for client {self.cid}") 
-
-        # Calculate metrics
-        metrics = {"loss": total_loss / total_examples if total_examples > 0 else float('inf')}
-        
-        # Clean up and free memory
-        if self.device.type == "cuda" and ENABLE_MEMORY_CLEANUP:
-            del optimizer, batch_count, state_dict
-            import gc; gc.collect()
-            torch.cuda.empty_cache()
-            log_memory_usage(f"Client {self.cid} after fit")
-        elif self.device.type == "cuda":
-            log_memory_usage(f"Client {self.cid} after fit")
-        
-        return (
-            self.get_parameters(),
-            total_examples,
-            metrics
-        )
 
     def evaluate(self, parameters, config):
         """Evaluate the model on the local test dataset.
